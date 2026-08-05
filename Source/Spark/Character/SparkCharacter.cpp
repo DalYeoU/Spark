@@ -19,11 +19,11 @@ ASparkCharacter::ASparkCharacter()
     GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 
     // 빠른 반응감과 공중 제어력을 제공하기 위한 기본 이동 스펙 초기화
-    GetCharacterMovement()->JumpZVelocity = 450.0f; // 점프 높이 조절
-    GetCharacterMovement()->AirControl = 0.85f; // 공중 제어력 (지상 대비 약 80~90% 반응성)
-    GetCharacterMovement()->GravityScale = 1.2f; // 중력 스케일
-    GetCharacterMovement()->MaxWalkSpeed = 500.0f; // 최대 이동 속도
-    GetCharacterMovement()->MaxAcceleration = 4096.0f; // 입력 즉시 최대 속도에 도달하도록 가속도 상향
+    GetCharacterMovement()->JumpZVelocity = 450.0f;     // 점프 높이 조절
+    GetCharacterMovement()->AirControl = 0.85f;         // 공중 제어력 (지상 대비 약 85% 반응성)
+    GetCharacterMovement()->GravityScale = 1.2f;        // 중력 스케일
+    GetCharacterMovement()->MaxWalkSpeed = 500.0f;      // 최대 이동 속도
+    GetCharacterMovement()->MaxAcceleration = 4096.0f;  // 입력 즉시 최대 속도에 도달하도록 가속도 상향
 
     // 3인칭 쿼터뷰/팔로우 시점을 위한 스프링암 컴포넌트 생성 및 시점 회전 동기화
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));

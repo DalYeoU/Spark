@@ -12,9 +12,9 @@
 UCLASS()
 class SPARK_API ASparkGameMode : public AGameModeBase
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	// 기본 Pawn 및 PlayerController 클래스 타입을 기본값으로 설정
-	ASparkGameMode();
+    // 기본 Pawn 및 PlayerController 클래스 타입을 기본값으로 설정
+    ASparkGameMode();
 };

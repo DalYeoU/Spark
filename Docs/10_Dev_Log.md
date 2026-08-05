@@ -315,8 +315,9 @@ flowchart LR
 
 | 기능 | 상태 |
 |------|------|
-| Move | Planned |
-| Jump | Planned |
+| Move | Completed |
+| Jump | Completed |
+| Air Control | Completed |
 | Wall Slide | Planned |
 | Wall Jump | Planned |
 | Landing Spark | Planned |
@@ -704,6 +705,61 @@ flowchart LR
 ### 다음 작업
 
 전체 문서 간 용어와 시스템 구조의 일관성을 검토한다.
+
+---
+
+# Core Prototype Development Log
+
+## 2026-08-06 — Phase 1 Core Prototype: 이동, 점프, 공중 제어 구현
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Character / Gameplay / Input  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-9, SPARK-10, SPARK-11  
+
+### 목표
+
+- Enhanced Input 기반 3D 이동(Move, Look) 및 점프(Jump) 로직 구현
+- 3D 퍼즐 플랫폼 메커니즘에 맞춘 캐릭터 조작감 및 공중 제어력(Air Control) 튜닝
+- Spark 아키텍처 규칙(PlayerController -> Character)을 만족하는 생명주기 안정적 입력 바인딩 구축
+
+### 작업 내용
+
+1. **`ASparkCharacter` 구현**:
+   - `USpringArmComponent` 및 `UCameraComponent` 캡슐화 및 생성자 세팅
+   - `bOrientRotationToMovement = true` 및 시점 기반 지면 수평 이동 벡터 계산(`FRotationMatrix(YawRotation)`)
+   - 캐릭터 키 100cm 스펙에 맞춘 점프 높이(`JumpZVelocity = 450.0f`), 중력 스케일(`1.2f`), 반응형 가속도(`MaxAcceleration = 4096.0f`) 및 공중 제어력(`AirControl = 0.85f`) 튜닝
+2. **`ASparkPlayerController` 구현**:
+   - `BeginPlay()` 시점 `UEnhancedInputLocalPlayerSubsystem`을 통한 `IMC_Default` 등록
+   - `OnPossess(APawn* InPawn)` 타이밍에 빙의된 캐릭터 캐스팅 및 안전한 Input Action (`IA_Move`, `IA_Look`, `IA_Jump`) 바인딩 연결
+   - `OnUnPossess()` 시점에 액션 바인딩 해제(`ClearActionBindings`) 처리
+3. **`ASparkGameMode` 구현**:
+   - C++ 생성자에서 기본 `DefaultPawnClass`(`ASparkCharacter`) 및 `PlayerControllerClass`(`ASparkPlayerController`) 타입 지정
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: `SetupInputComponent()`에서 입력 바인딩 시 `GetPawn()`이 `nullptr`을 반환하여 바인딩 스킵 및 조작 불가**
+  - **원인**: PlayerController 생성 직후 실행되는 `SetupInputComponent()` 타이밍에는 아직 컨트롤러가 캐릭터 Pawn에 빙의(Possess)되지 않은 상태임.
+  - **해결**: 캐릭터 빙의가 확정되는 생명주기 시점인 `OnPossess(InPawn)`으로 바인딩 로직을 이관하여 타이밍 이슈 해결.
+- **문제 2: 마우스 좌우 회전 반대 및 W/A/S/D 90도 틀어짐**
+  - **원인**: `IMC_Default` 에셋의 Modifiers 축 설정 불일치 (W/S가 X축, D/A가 Y축으로 들어가며 90도 회전) 및 마우스 Negate의 X축 수직/수평 반전 문제.
+  - **해결**: `IMC_Default` 매핑 정정
+    - `W`: `Swizzle Input Axis Values` 추가 (Y축 전진)
+    - `S`: `Swizzle Input Axis Values` + `Negate` 추가 (Y축 후진)
+    - `D`: Modifiers 없음 (X축 우측)
+    - `A`: `Negate` 추가 (X축 좌측)
+    - `IA_Look`: `Negate` Modifier 중 `X`축 체크 해제하여 정상 좌우 시점 회전 확보
+
+### 결과
+
+- 3D 퍼즐 플랫폼 조작감 검증 완료 (즉각적인 가속, 가변 점프, 정교한 공중 위치 수정 가능)
+- C++ 뼈대 및 블루프린트 연동 에셋 세팅 완료
+
+### 관련 Commit 및 Issue
+
+- **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`
+- **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11) (전부 완료 처리)
 
 ---
 

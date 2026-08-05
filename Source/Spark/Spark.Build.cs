@@ -7,7 +7,11 @@ public class Spark : ModuleRules
 	public Spark(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-	
+
+		// Allows includes like "Framework/SparkPlayerController.h" from module root,
+		// matching the C++ Folder Structure defined in Docs/07_Coding_Convention.md.
+		PublicIncludePaths.Add(ModuleDirectory);
+
 		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] {  });

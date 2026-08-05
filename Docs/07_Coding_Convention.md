@@ -1443,6 +1443,8 @@ Tick이 필요하다면 해당 조건에서만 활성화한다.
 | Level              | L_     | `L_Factory_01`         |
 | Level Sequence     | LS_    | `LS_Intro`             |
 | Render Target      | RT_    | `RT_SparkMask`         |
+| Input Action       | IA_    | `IA_Jump`              |
+| Input Mapping Context | IMC_ | `IMC_Default`         |
 
 ---
 
@@ -1517,6 +1519,10 @@ Content/
 │   │   ├── Interactions/
 │   │   ├── Puzzles/
 │   │   └── Framework/
+│   │
+│   ├── Input/
+│   │   ├── Actions/
+│   │   └── Contexts/
 │   │
 │   ├── Data/
 │   │   ├── Surface/
@@ -1593,8 +1599,16 @@ Source/Spark/
 
 # Comment Convention
 
-주석은 코드가 무엇을 하는지보다
-왜 그렇게 작성했는지를 설명한다.
+Function과 Class 위에는 무엇을 하는 코드인지 요약하는 주석을 남긴다.
+
+```cpp
+// Character의 착지, Wall Slide, Wall Jump 이벤트를 받아 Spark를 생성한다.
+void USparkComponent::HandleMovementEvent(...)
+```
+
+코드 내부 개별 라인 주석은 무엇을 하는지보다
+왜 그렇게 작성했는지를 설명한다. 코드를 그대로 읽으면 알 수 있는 내용을
+줄 단위로 반복해서 설명하지 않는다.
 
 지양:
 

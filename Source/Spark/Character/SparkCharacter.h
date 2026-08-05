@@ -1,0 +1,56 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Character.h"
+#include "SparkCharacter.generated.h"
+
+class USpringArmComponent;
+class UCameraComponent;
+struct FInputActionValue;
+
+/**
+ * ASparkCharacter
+ * 
+ * Spark 프로젝트의 메인 플레이어 캐릭터 클래스입니다.
+ * 3D 퍼즐 플랫폼 환경에서 기본 이동, 시점 회전 및 카메라 조작을 담당합니다.
+ */
+UCLASS()
+class SPARK_API ASparkCharacter : public ACharacter
+{
+	GENERATED_BODY()
+
+public:
+	// 기본 사양 및 컴포넌트 초기화
+	ASparkCharacter();
+	
+	// Enhanced Input 입력값에 따른 캐릭터 이동 가공 및 입력 전달
+	void Move(const FInputActionValue& Value);
+
+	// Enhanced Input 마우스 델타값에 따른 컨트롤러 시점 회전 처리
+	void Look(const FInputActionValue& Value);
+	
+	// 카메라 스프링암 컴포넌트 안전한 게터
+	FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
+
+	// 팔로우 카메라 컴포넌트 안전한 게터
+	FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+
+protected:
+	// 캐릭터 초기화 및 게임플레이 시작 처리
+	virtual void BeginPlay() override;
+
+	// 프레임별 로직 업데이트
+	virtual void Tick(float DeltaTime) override;
+	
+	// 바인딩된 입력 컴포넌트 설정
+	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	
+private:
+	// 캐릭터와의 거리를 유지하고 벽 충돌 시 카메라를 당겨주는 스프링암 컴포넌트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USpringArmComponent> CameraBoom;
+	
+	// 플레이어 뷰포트 시점을 제공하는 팔로우 카메라 컴포넌트
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UCameraComponent> FollowCamera;
+};

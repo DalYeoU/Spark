@@ -15,28 +15,32 @@ class UInputAction;
 UCLASS()
 class SPARK_API ASparkPlayerController : public APlayerController
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	// 기본 초기화 및 컴포넌트 설정
-	ASparkPlayerController();
+    // 기본 초기화 및 컴포넌트 설정
+    ASparkPlayerController();
 
 protected:
-	// 로컬 플레이어 서브시스템을 통해 입력 매핑 컨텍스트(IMC_Default)를 활성화
-	virtual void BeginPlay() override;
-	virtual void OnPossess(APawn* InPawn) override;
-	virtual void OnUnPossess() override;
+    // 로컬 플레이어 서브시스템을 통해 입력 매핑 컨텍스트(IMC_Default)를 활성화
+    virtual void BeginPlay() override;
+    virtual void OnPossess(APawn* InPawn) override;
+    virtual void OnUnPossess() override;
 
 private:
-	// 플레이어 생성 시 기본으로 활성화할 입력 매핑 컨텍스트 에셋
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UInputMappingContext> DefaultMappingContext;
+    // 플레이어 생성 시 기본으로 활성화할 입력 매핑 컨텍스트 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UInputMappingContext> DefaultMappingContext;
 
-	// 캐릭터 상하좌우 이동에 사용하는 입력 액션 에셋
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UInputAction> MoveAction;
+    // 캐릭터 상하좌우 이동에 사용하는 입력 액션 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UInputAction> MoveAction;
 
-	// 마우스 델타 시점 회전에 사용하는 입력 액션 에셋
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
-	TObjectPtr<UInputAction> LookAction;
+    // 마우스 델타 시점 회전에 사용하는 입력 액션 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UInputAction> LookAction;
+
+    // 캐릭터 점프 조작에 사용하는 입력 액션 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UInputAction> JumpAction;
 };

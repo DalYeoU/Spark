@@ -710,19 +710,20 @@ flowchart LR
 
 # Core Prototype Development Log
 
-## 2026-08-06 — Phase 1 Core Prototype: 이동, 점프, 공중 제어 구현
+## 2026-08-06 — Phase 1 Core Prototype: 이동, 점프, 공중 제어 및 착지 감지 구현
 
 **Milestone:** Phase 1 — Core Prototype  
 **Category:** Character / Gameplay / Input  
 **Status:** Completed  
 **Branch:** feature/movement  
-**Issues:** SPARK-9, SPARK-10, SPARK-11  
+**Issues:** SPARK-9, SPARK-10, SPARK-11, SPARK-12  
 
 ### 목표
 
 - Enhanced Input 기반 3D 이동(Move, Look) 및 점프(Jump) 로직 구현
 - 3D 퍼즐 플랫폼 메커니즘에 맞춘 캐릭터 조작감 및 공중 제어력(Air Control) 튜닝
 - Spark 아키텍처 규칙(PlayerController -> Character)을 만족하는 생명주기 안정적 입력 바인딩 구축
+- 공중 점프 후 지면 착지 순간을 판정하는 Landing Event 구현 (향후 Spark 피드백 연동 기반)
 
 ### 작업 내용
 
@@ -730,6 +731,8 @@ flowchart LR
    - `USpringArmComponent` 및 `UCameraComponent` 캡슐화 및 생성자 세팅
    - `bOrientRotationToMovement = true` 및 시점 기반 지면 수평 이동 벡터 계산(`FRotationMatrix(YawRotation)`)
    - 캐릭터 키 100cm 스펙에 맞춘 점프 높이(`JumpZVelocity = 450.0f`), 중력 스케일(`1.2f`), 반응형 가속도(`MaxAcceleration = 4096.0f`) 및 공중 제어력(`AirControl = 0.85f`) 튜닝
+   - 언리얼 엔진 `Landed(const FHitResult& Hit)` 버추얼 함수 오버라이드 및 `HandleLanded(Hit)` 이벤트 핸들러 분리 구현
+   - 착지한 대상 액터(`Hit.GetActor()`) 유효성 검사 및 착지 확인 로그 출력 로직 추가
 2. **`ASparkPlayerController` 구현**:
    - `BeginPlay()` 시점 `UEnhancedInputLocalPlayerSubsystem`을 통한 `IMC_Default` 등록
    - `OnPossess(APawn* InPawn)` 타이밍에 빙의된 캐릭터 캐스팅 및 안전한 Input Action (`IA_Move`, `IA_Look`, `IA_Jump`) 바인딩 연결
@@ -744,22 +747,21 @@ flowchart LR
   - **해결**: 캐릭터 빙의가 확정되는 생명주기 시점인 `OnPossess(InPawn)`으로 바인딩 로직을 이관하여 타이밍 이슈 해결.
 - **문제 2: 마우스 좌우 회전 반대 및 W/A/S/D 90도 틀어짐**
   - **원인**: `IMC_Default` 에셋의 Modifiers 축 설정 불일치 (W/S가 X축, D/A가 Y축으로 들어가며 90도 회전) 및 마우스 Negate의 X축 수직/수평 반전 문제.
-  - **해결**: `IMC_Default` 매핑 정정
-    - `W`: `Swizzle Input Axis Values` 추가 (Y축 전진)
-    - `S`: `Swizzle Input Axis Values` + `Negate` 추가 (Y축 후진)
-    - `D`: Modifiers 없음 (X축 우측)
-    - `A`: `Negate` 추가 (X축 좌측)
-    - `IA_Look`: `Negate` Modifier 중 `X`축 체크 해제하여 정상 좌우 시점 회전 확보
+  - **해결**: `IMC_Default` 매핑 정정 (W: Swizzle, S: Swizzle+Negate, D: 없음, A: Negate, IA_Look: Negate X축 해제).
+- **문제 3: `FHitResult`에서 `GetName()` 호출 시 심볼 해소 불가 에러**
+  - **원인**: `FHitResult` 구조체 자체에는 `GetName()` 멤버 함수가 존재하지 않음.
+  - **해결**: 착지한 충돌 대상 액터 `Hit.GetActor()`의 유효성 검증 후 `GetActor()->GetName()`으로 안전하게 접근하도록 수정.
 
 ### 결과
 
 - 3D 퍼즐 플랫폼 조작감 검증 완료 (즉각적인 가속, 가변 점프, 정교한 공중 위치 수정 가능)
+- 지면 착지 순간(Landing Event) 감지 및 착지 대상 액터 이름(예: `Floor_0`) 로그 출력 성공
 - C++ 뼈대 및 블루프린트 연동 에셋 세팅 완료
 
 ### 관련 Commit 및 Issue
 
-- **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`
-- **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11) (전부 완료 처리)
+- **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`, `SPARK-12 착지 감지 구현 및 Landing Event 핸들러 추가`
+- **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11), [SPARK-12](https://dalyeou.atlassian.net/browse/SPARK-12) (전부 완료 처리)
 
 ---
 

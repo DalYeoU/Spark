@@ -44,6 +44,12 @@ protected:
 
     // 바인딩된 입력 컴포넌트 설정
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+    
+    // 지면 착지 시 언리얼 엔진에서 자동으로 호출되는 오버라이드 함수
+    virtual void Landed(const FHitResult& Hit) override;
+    
+    // 착지 이벤트 발생 시 세부 로직 및 피드백 처리 핸들러
+    void HandleLanded(const FHitResult& Hit);
 
 private:
     // 캐릭터와의 거리를 유지하고 벽 충돌 시 카메라를 당겨주는 스프링암 컴포넌트

@@ -83,3 +83,18 @@ void ASparkCharacter::Look(const FInputActionValue& Value)
         AddControllerPitchInput(LookAxisVector.Y);
     }
 }
+
+void ASparkCharacter::Landed(const FHitResult& Hit)
+{
+    Super::Landed(Hit);
+    
+    // 착지 이벤트 핸들러 호출
+    HandleLanded(Hit);
+}
+
+void ASparkCharacter::HandleLanded(const FHitResult& Hit)
+{
+    // 착지 감지 확인을 위한 임시 로그 (향후 SparkComponent 연동 지점)
+    FString SurfaceName = Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("Unknown Surface");
+    UE_LOG(LogTemp, Log, TEXT("SparkCharacter Landed on: %s"), *SurfaceName);
+}

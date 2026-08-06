@@ -3,6 +3,8 @@
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "Camera/PlayerCameraManager.h"
 #include "InputActionValue.h"
 
 ASparkCharacter::ASparkCharacter()
@@ -40,6 +42,9 @@ ASparkCharacter::ASparkCharacter()
 void ASparkCharacter::BeginPlay()
 {
     Super::BeginPlay();
+    
+    // 시작 시점의 위치를 초기 리스폰 위치로 기억
+    RespawnLocation = GetActorLocation();
 }
 
 void ASparkCharacter::Tick(float DeltaTime)
@@ -216,4 +221,30 @@ void ASparkCharacter::HandleWallJump()
 {
     // Wall Jump 발생 로그 (추후 SparkComponent 피드백 연동 지점)
     UE_LOG(LogTemp, Log, TEXT("SparkCharacter Executed Wall Jump!"));   
+}
+
+void ASparkCharacter::FellOutOfWorld(const UDamageType& DamageType)
+{
+    // 부모 Super::FellOutOfWorld()는 캐릭터를 Destroy()하므로 호출하지 않고 리스폰 실행
+    UE_LOG(LogTemp, Warning, TEXT("SparkCharacter FellOutOfWorld! Triggering Fast Respawn."));
+    
+    RespawnAtLastCheckpoint();
+}
+
+void ASparkCharacter::RespawnAtLastCheckpoint()
+{
+    // 속도 및 움직임 초기화 후 리스폰 위치로 이동
+    GetCharacterMovement()->StopActiveMovement();
+    GetCharacterMovement()->Velocity = FVector::ZeroVector;
+
+    SetActorLocation(RespawnLocation);
+
+    // 텔레포트 자체는 즉시 처리하고, 화면만 검은색에서 서서히 밝아지게 해서 순간 이동의 위화감을 가림
+    if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
+    {
+        if (APlayerCameraManager* CameraManager = PlayerController->PlayerCameraManager)
+        {
+            CameraManager->StartCameraFade(1.0f, 0.0f, RespawnFadeInDuration, FLinearColor::Black, false, true);
+        }
+    }
 }

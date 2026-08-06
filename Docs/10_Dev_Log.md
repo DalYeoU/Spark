@@ -710,13 +710,13 @@ flowchart LR
 
 # Core Prototype Development Log
 
-## 2026-08-06 — Phase 1 Core Prototype: 이동, 점프, 공중 제어, 착지 감지, Wall Slide 및 Wall Jump 구현
+## 2026-08-06 — Phase 1 Core Prototype: 이동, 점프, 공중 제어, 착지 감지, Wall Slide/Jump, 실패 감지 및 Respawn 구현
 
 **Milestone:** Phase 1 — Core Prototype  
-**Category:** Character / Gameplay / Input  
+**Category:** Character / Gameplay / Input / Environment  
 **Status:** Completed  
 **Branch:** feature/movement  
-**Issues:** SPARK-9, SPARK-10, SPARK-11, SPARK-12, SPARK-13, SPARK-14  
+**Issues:** SPARK-9, SPARK-10, SPARK-11, SPARK-12, SPARK-13, SPARK-14, SPARK-15, SPARK-16  
 
 ### 목표
 
@@ -725,6 +725,7 @@ flowchart LR
 - Spark 아키텍처 규칙(PlayerController -> Character)을 만족하는 생명주기 안정적 입력 바인딩 구축
 - 공중 점프 후 지면 착지 순간을 판정하는 Landing Event 구현 (향후 Spark 피드백 연동 기반)
 - 수직 벽면을 타고 천천히 미끄러져 내리는 Wall Slide 및 사선 반사 솟구침 Wall Jump 메커니즘 구현
+- 실패 구역 오버랩 감지 트리거(`ASparkHazardZone`) 구현 및 순간이동 + 카메라 페이드 연동 빠른 Respawn 구축
 
 ### 작업 내용
 
@@ -736,11 +737,16 @@ flowchart LR
    - 전방 수직 벽면 감지(`TraceForWall()`), 감속 슬라이드(`ClampFallSpeedForWallSlide()`), 슬라이드 진입 조건 검사(`CanEnterWallSlide()`) 모듈화 리팩토링 구현
    - `Jump()` 오버라이드를 통한 Wall Slide 중 Wall Jump 분기 처리: 감지된 벽 법선 벡터(`CurrentWallNormal`) 기준 반사 수평 힘(`500.0f`) + 수직 솟구침 힘(`500.0f`)을 합성하여 `LaunchCharacter` 물리 적용
    - `ECC_GameTraceChannel1` 전용 트레이스 채널 사용 및 수직 벽면 필터링(`Abs(ImpactNormal.Z) < 0.3f`), 0.4초 쿨다운(`WallJumpCooldownDuration`) 및 착지 전 1회 제한(`bHasWallJumpedSinceGrounded`) 안전 플래그 구현
-2. **`ASparkPlayerController` 구현**:
+   - `FellOutOfWorld()` 오버라이드 (부모 액터 파괴 방지) 및 `RespawnAtLastCheckpoint()` 구현: 시작 위치(`RespawnLocation`)로 즉시 위치 이동 후 `PlayerCameraManager->StartCameraFade(1.0f, 0.0f)` 카메라 페이드 인 연출 연동
+2. **`ASparkHazardZone` 구현**:
+   - `Source/Spark/Interaction/` 규격 위치에 C++ 실패 영역 액터 생성
+   - `UBoxComponent` 루트 지정 및 오버랩 전용 `Trigger` 프로필 설정
+   - `OnOverlapBegin` 이벤트 발생 시 진입한 `ASparkCharacter`에 `FellOutOfWorld(*GetDefault<UDamageType>())` 전달
+3. **`ASparkPlayerController` 구현**:
    - `BeginPlay()` 시점 `UEnhancedInputLocalPlayerSubsystem`을 통한 `IMC_Default` 등록
    - `OnPossess(APawn* InPawn)` 타이밍에 빙의된 캐릭터 캐스팅 및 안전한 Input Action (`IA_Move`, `IA_Look`, `IA_Jump`) 바인딩 연결
    - `OnUnPossess()` 시점에 액션 바인딩 해제(`ClearActionBindings`) 처리
-3. **`ASparkGameMode` 구현**:
+4. **`ASparkGameMode` 구현**:
    - C++ 생성자에서 기본 `DefaultPawnClass`(`ASparkCharacter`) 및 `PlayerControllerClass`(`ASparkPlayerController`) 타입 지정
 
 ### 문제 및 해결 (Troubleshooting)
@@ -754,18 +760,21 @@ flowchart LR
 - **문제 3: `FHitResult`에서 `GetName()` 호출 시 심볼 해소 불가 에러**
   - **원인**: `FHitResult` 구조체 자체에는 `GetName()` 멤버 함수가 존재하지 않음.
   - **해결**: 착지한 충돌 대상 액터 `Hit.GetActor()`의 유효성 검증 후 `GetActor()->GetName()`으로 안전하게 접근하도록 수정.
+- **문제 4: `FellOutOfWorld(*UDamageType::StaticClass())` 호출 시 UClass ➔ const UDamageType& 변환 불가 컴파일 에러**
+  - **원인**: `StaticClass()`는 `UClass*`를 반환하므로 객체 참조 인수를 요구하는 `FellOutOfWorld` 함수와 타입 불일치.
+  - **해결**: `GetDefault<UDamageType>()`을 사용해 기본 객체(Default Object) 인스턴스 참조를 전달하여 해결.
 
 ### 결과
 
 - 3D 퍼즐 플랫폼 조작감 검증 완료 (즉각적인 가속, 가변 점프, 정교한 공중 위치 수정 가능)
 - 지면 착지 순간(Landing Event) 감지 및 착지 대상 액터 이름(예: `Floor_0`) 로그 출력 성공
 - 공중에서 벽면에 밀착 시 일정한 속도(-150cm/s)로 제어되며 감속 미끄러지는 Wall Slide 및 벽 반대편 상단 사선으로 튕겨 오르는 Wall Jump 동작 실기 검증 완료
-- 단일 책임 원칙(SRP) 기반 `CheckWallSlide()` 모듈화 리팩토링 완료
+- `ASparkHazardZone` 실패 영역 오버랩 진입 시 캐릭터 파괴 없이 초기 스폰 위치로 정교하게 순간이동하며, 검은 화면에서 서서히 밝아지는 카메라 페이드 연출 연동 성공
 
 ### 관련 Commit 및 Issue
 
-- **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`, `SPARK-12 착지 감지 구현 및 Landing Event 핸들러 추가`, `SPARK-13 Wall Slide 구현 (벽 감지 및 속도 제어)`, `SPARK-14 Wall Jump 구현 및 Wall Slide 로직 모듈화 리팩토링`
-- **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11), [SPARK-12](https://dalyeou.atlassian.net/browse/SPARK-12), [SPARK-13](https://dalyeou.atlassian.net/browse/SPARK-13), [SPARK-14](https://dalyeou.atlassian.net/browse/SPARK-14) (전부 완료 처리)
+- **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`, `SPARK-12 착지 감지 구현 및 Landing Event 핸들러 추가`, `SPARK-13 Wall Slide 구현 (벽 감지 및 속도 제어)`, `SPARK-14 Wall Jump 구현 및 Wall Slide 로직 모듈화 리팩토링`, `SPARK-15 SPARK-16 실패 영역 감지(SparkHazardZone) 및 카메라 페이드 연동 빠른 Respawn 구현`
+- **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11), [SPARK-12](https://dalyeou.atlassian.net/browse/SPARK-12), [SPARK-13](https://dalyeou.atlassian.net/browse/SPARK-13), [SPARK-14](https://dalyeou.atlassian.net/browse/SPARK-14), [SPARK-15](https://dalyeou.atlassian.net/browse/SPARK-15), [SPARK-16](https://dalyeou.atlassian.net/browse/SPARK-16) (Phase 1 전 이슈 완료 처리)
 
 ---
 

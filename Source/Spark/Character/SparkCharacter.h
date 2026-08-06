@@ -37,6 +37,12 @@ public:
 
     // 팔로우 카메라 컴포넌트 안전한 게터
     FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+    
+    // 낙사 또는 HazardZone 오버랩시 엔진에서 호출되는 사망/실패 처리 오버라이드 함수
+    virtual void FellOutOfWorld(const class UDamageType& DamageType) override;
+    
+    // 빠른 리스폰 처리 (스폰 위치 또는 최신 체크포인트 위치로 이동)
+    void RespawnAtLastCheckpoint();
 
 protected:
     // 캐릭터 초기화 및 게임플레이 시작 처리
@@ -93,7 +99,7 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float WallTraceDistance = 60.0f;
     
-    // 감지된 벽면의 노멀(법선)벡터
+    // 감지된 벽면의 노멀 벡터
     FVector CurrentWallNormal = FVector::ZeroVector;
     
     // Wall Jump시 벽 반대 방향으로 밀어내는 수평 힘
@@ -113,4 +119,11 @@ private:
 
     // 착지 전까지 Wall Jump를 한 번만 허용하기 위한 상태 플래그
     bool bHasWallJumpedSinceGrounded = false;
+    
+    // 리스폰에 활용할 시작/체크포인트 위치
+    FVector RespawnLocation = FVector::ZeroVector;
+
+    // 리스폰 직후 화면이 검은색에서 밝아지는 데 걸리는 시간
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float RespawnFadeInDuration = 2.0f;
 };

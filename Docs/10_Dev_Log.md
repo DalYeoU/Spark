@@ -710,13 +710,13 @@ flowchart LR
 
 # Core Prototype Development Log
 
-## 2026-08-06 — Phase 1 Core Prototype: 이동, 점프, 공중 제어 및 착지 감지 구현
+## 2026-08-06 — Phase 1 Core Prototype: 이동, 점프, 공중 제어, 착지 감지 및 Wall Slide 구현
 
 **Milestone:** Phase 1 — Core Prototype  
 **Category:** Character / Gameplay / Input  
 **Status:** Completed  
 **Branch:** feature/movement  
-**Issues:** SPARK-9, SPARK-10, SPARK-11, SPARK-12  
+**Issues:** SPARK-9, SPARK-10, SPARK-11, SPARK-12, SPARK-13  
 
 ### 목표
 
@@ -724,6 +724,7 @@ flowchart LR
 - 3D 퍼즐 플랫폼 메커니즘에 맞춘 캐릭터 조작감 및 공중 제어력(Air Control) 튜닝
 - Spark 아키텍처 규칙(PlayerController -> Character)을 만족하는 생명주기 안정적 입력 바인딩 구축
 - 공중 점프 후 지면 착지 순간을 판정하는 Landing Event 구현 (향후 Spark 피드백 연동 기반)
+- 수직 벽면을 타고 천천히 미끄러져 내리는 Wall Slide 구현 및 정면 벽 감지 라인 트레이스 구축
 
 ### 작업 내용
 
@@ -733,6 +734,7 @@ flowchart LR
    - 캐릭터 키 100cm 스펙에 맞춘 점프 높이(`JumpZVelocity = 450.0f`), 중력 스케일(`1.2f`), 반응형 가속도(`MaxAcceleration = 4096.0f`) 및 공중 제어력(`AirControl = 0.85f`) 튜닝
    - 언리얼 엔진 `Landed(const FHitResult& Hit)` 버추얼 함수 오버라이드 및 `HandleLanded(Hit)` 이벤트 핸들러 분리 구현
    - 착지한 대상 액터(`Hit.GetActor()`) 유효성 검사 및 착지 확인 로그 출력 로직 추가
+   - 정면 방향 LineTrace 기반 벽 감지(`CheckWallSlide()`) 구현: 공중 상태(`IsFalling()`)에서 정면에 벽 감지 시 낙하 속도를 `WallSlideSpeed(-150.0f)`로 제어하여 미끄러짐 처리
 2. **`ASparkPlayerController` 구현**:
    - `BeginPlay()` 시점 `UEnhancedInputLocalPlayerSubsystem`을 통한 `IMC_Default` 등록
    - `OnPossess(APawn* InPawn)` 타이밍에 빙의된 캐릭터 캐스팅 및 안전한 Input Action (`IA_Move`, `IA_Look`, `IA_Jump`) 바인딩 연결
@@ -756,12 +758,13 @@ flowchart LR
 
 - 3D 퍼즐 플랫폼 조작감 검증 완료 (즉각적인 가속, 가변 점프, 정교한 공중 위치 수정 가능)
 - 지면 착지 순간(Landing Event) 감지 및 착지 대상 액터 이름(예: `Floor_0`) 로그 출력 성공
+- 공중에서 벽면에 밀착 시 일정한 속도(-150cm/s)로 제어되며 감속 미끄러지는 Wall Slide 동작 검증 완료
 - C++ 뼈대 및 블루프린트 연동 에셋 세팅 완료
 
 ### 관련 Commit 및 Issue
 
-- **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`, `SPARK-12 착지 감지 구현 및 Landing Event 핸들러 추가`
-- **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11), [SPARK-12](https://dalyeou.atlassian.net/browse/SPARK-12) (전부 완료 처리)
+- **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`, `SPARK-12 착지 감지 구현 및 Landing Event 핸들러 추가`, `SPARK-13 Wall Slide 구현 (벽 감지 및 속도 제어)`
+- **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11), [SPARK-12](https://dalyeou.atlassian.net/browse/SPARK-12), [SPARK-13](https://dalyeou.atlassian.net/browse/SPARK-13) (전부 완료 처리)
 
 ---
 

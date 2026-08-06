@@ -50,6 +50,9 @@ protected:
     
     // 착지 이벤트 발생 시 세부 로직 및 피드백 처리 핸들러
     void HandleLanded(const FHitResult& Hit);
+    
+    // 전방 벽면 감지 및 wall Slide 조건 검사
+    void CheckWallSlide();
 
 private:
     // 캐릭터와의 거리를 유지하고 벽 충돌 시 카메라를 당겨주는 스프링암 컴포넌트
@@ -59,4 +62,16 @@ private:
     // 플레이어 뷰포트 시점을 제공하는 팔로우 카메라 컴포넌트
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UCameraComponent> FollowCamera;
+    
+    //현재 벽 타기 상태 여부
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bIsWallSliding;
+    
+    // 벽 타기 시 낙하 속도 제한 (-150.0f = 천천히 미끄러짐)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float WallSlideSpeed = -150.0f;
+
+    // 캐릭터 정면 기준 벽 감지 트레이스 거리
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float WallTraceDistance = 60.0f;
 };

@@ -45,6 +45,9 @@ void ASparkCharacter::BeginPlay()
 void ASparkCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
+    
+    // 공중 및 Wall Slide 감지 처리
+    CheckWallSlide();
 }
 
 void ASparkCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -97,4 +100,42 @@ void ASparkCharacter::HandleLanded(const FHitResult& Hit)
     // 착지 감지 확인을 위한 임시 로그 (향후 SparkComponent 연동 지점)
     FString SurfaceName = Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("Unknown Surface");
     UE_LOG(LogTemp, Log, TEXT("SparkCharacter Landed on: %s"), *SurfaceName);
+}
+
+void ASparkCharacter::CheckWallSlide()
+{
+    // 캐릭터가 공중(Falling)에 떠 있는 상태가 아니면 벽 타기 해제
+    if (!GetCharacterMovement()->IsFalling())
+    {
+        bIsWallSliding = false;
+        return;
+    }
+
+    // 캐릭터 정면 방향으로 라인 트레이스를 수행하여 벽면 감지
+    FVector Start = GetActorLocation();
+    FVector End = Start + (GetActorForwardVector() * WallTraceDistance);
+
+    FHitResult HitResult;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+
+    bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams);
+
+    // 정면에 벽이 감지되었을 때만 Wall Slide 활성화
+    if (bHit && HitResult.GetActor())
+    {
+        bIsWallSliding = true;
+
+        // Z축 낙하 속도를 제한하여 천천히 미끄러지도록 처리
+        FVector CurrentVelocity = GetCharacterMovement()->Velocity;
+        if (CurrentVelocity.Z < WallSlideSpeed)
+        {
+            CurrentVelocity.Z = WallSlideSpeed;
+            GetCharacterMovement()->Velocity = CurrentVelocity;
+        }
+    }
+    else
+    {
+        bIsWallSliding = false;
+    }
 }

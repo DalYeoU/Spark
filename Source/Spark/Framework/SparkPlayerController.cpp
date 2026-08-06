@@ -36,20 +36,16 @@ void ASparkPlayerController::OnPossess(APawn* InPawn)
         {
             if (MoveAction)
             {
-                EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, SparkCharacter,
-                                                   &ASparkCharacter::Move);
+                EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, SparkCharacter, &ASparkCharacter::Move);
             }
             if (LookAction)
             {
-                EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, SparkCharacter,
-                                                   &ASparkCharacter::Look);
+                EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, SparkCharacter, &ASparkCharacter::Look);
             }
             if (JumpAction)
             {
-                EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, SparkCharacter,
-                                                   &ASparkCharacter::Jump);
-                EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, SparkCharacter,
-                                                   &ASparkCharacter::StopJumping);
+                EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, SparkCharacter, &ASparkCharacter::Jump);
+                EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, SparkCharacter, &ASparkCharacter::StopJumping);
             }
         }
     }

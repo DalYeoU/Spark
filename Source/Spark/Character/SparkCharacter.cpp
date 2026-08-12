@@ -1,11 +1,14 @@
 #include "SparkCharacter.h"
 
 #include "Camera/CameraComponent.h"
+#include "Components/CapsuleComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
 #include "InputActionValue.h"
+
+#include "Components/SparkComponent.h"
 
 ASparkCharacter::ASparkCharacter()
 {
@@ -37,6 +40,9 @@ ASparkCharacter::ASparkCharacter()
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
+    
+    // SparkComponent 생성
+    SparkComponent = CreateDefaultSubobject<USparkComponent>(TEXT("SparkComponent"));
 }
 
 void ASparkCharacter::BeginPlay()
@@ -94,21 +100,40 @@ void ASparkCharacter::Look(const FInputActionValue& Value)
 
 void ASparkCharacter::Landed(const FHitResult& Hit)
 {
+    // Super::Landed(Hit) 호출 직전에 속도를 구함
+    const float RawFallSpeed = GetCharacterMovement() ? GetCharacterMovement()->Velocity.Z : 0.0f;
+    
     Super::Landed(Hit);
     
     // 착지 이벤트 핸들러 호출
-    HandleLanded(Hit);
+    HandleLanded(Hit, RawFallSpeed);
 }
 
-void ASparkCharacter::HandleLanded(const FHitResult& Hit)
+void ASparkCharacter::HandleLanded(const FHitResult& Hit, float FallSpeed)
 {
-    // 착지 확인용 임시 로그 (추후 SparkComponent 연동 지점)
-    FString SurfaceName = Hit.GetActor() ? Hit.GetActor()->GetName() : TEXT("Unknown Surface");
-    UE_LOG(LogTemp, Log, TEXT("SparkCharacter Landed on: %s"), *SurfaceName);
-
     // 착지하면 Wall Jump 쿨다운과 재사용 제한을 초기화해서 새 벽에 바로 붙을 수 있게 함
     LastWallJumpTime = -1.0f;
     bHasWallJumpedSinceGrounded = false;
+    
+    // 캡슐 반높이를 구해 바닥 좌표 계산
+    float CapsuleHalfHeight = 88.0f;
+    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
+    {
+        CapsuleHalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight();
+    }
+    
+    // ImpactPoint가 없거나 이상하면 캐릭터 위치에서 발밑 좌료를 발바닥 위치로 사용
+    FVector LandingLocation = Hit.ImpactPoint;
+    if (LandingLocation.IsNearlyZero() || FVector::DistSquared(LandingLocation, GetActorLocation()) > 40000.0f)
+    {
+        LandingLocation = GetActorLocation() - FVector(0.0f, 0.0f, CapsuleHalfHeight);
+    }
+    
+    // Landing Spark 이벤트 트리거 (위치, 표면 법선, 낙하 속도 전달)
+    if (SparkComponent)
+    {
+        SparkComponent->TriggerLandingSpark(LandingLocation, Hit.ImpactNormal, FallSpeed);   
+    }
 }
 
 // 공중에서 정면 벽을 감지해 Wall Slide 상태를 갱신하고, 슬라이드 중이면 낙하 속도를 늦춘다.
@@ -131,6 +156,17 @@ void ASparkCharacter::CheckWallSlide()
 
         // 슬라이드 중에는 낙하 속도를 늦춰서 벽에 붙어 미끄러지는 느낌을 준다
         ClampFallSpeedForWallSlide();
+        
+        // 0.15초마다 마찰 Spark 이벤트 연속 트리거
+        const float CurrentTime = GetWorld()->GetTimeSeconds();
+        if (CurrentTime - LastWallSlideSparkTime > 0.15f)
+        {
+            LastWallSlideSparkTime = CurrentTime;
+            if (SparkComponent)
+            {
+                SparkComponent->TriggerWallSlideSpark(HitResult.ImpactPoint, HitResult.ImpactNormal);   
+            }
+        }
     }
     else
     {
@@ -219,15 +255,25 @@ void ASparkCharacter::DoWallJump()
 
 void ASparkCharacter::HandleWallJump()
 {
-    // Wall Jump 발생 로그 (추후 SparkComponent 피드백 연동 지점)
-    UE_LOG(LogTemp, Log, TEXT("SparkCharacter Executed Wall Jump!"));   
+    // 벽을 차고 나가는 그 위치와 법선으로 강한 Wall Jump Spark 트리거
+    if (SparkComponent)
+    {
+        // 정면 벽 트레이스 지점 또는 벽 노멀 반대 방향 접촉 위치
+        FHitResult HitResult;
+        if (TraceForWall(HitResult))
+        {
+            SparkComponent->TriggerWallJumpSpark(HitResult.ImpactPoint, HitResult.ImpactNormal);
+        }
+        else
+        {
+            // 혹시 트레이스 직후 미세하게 떨어졌다면 현재 위치와 노멀로 대체
+            SparkComponent->TriggerWallJumpSpark(GetActorLocation(), CurrentWallNormal);
+        }
+    }
 }
 
 void ASparkCharacter::FellOutOfWorld(const UDamageType& DamageType)
 {
-    // 부모 Super::FellOutOfWorld()는 캐릭터를 Destroy()하므로 호출하지 않고 리스폰 실행
-    UE_LOG(LogTemp, Warning, TEXT("SparkCharacter FellOutOfWorld! Triggering Fast Respawn."));
-    
     RespawnAtLastCheckpoint();
 }
 

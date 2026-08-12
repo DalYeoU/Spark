@@ -318,11 +318,11 @@ flowchart LR
 | Move | Completed |
 | Jump | Completed |
 | Air Control | Completed |
-| Wall Slide | Planned |
-| Wall Jump | Planned |
-| Landing Spark | Planned |
-| Wall Slide Spark | Planned |
-| Wall Jump Spark | Planned |
+| Wall Slide | Completed |
+| Wall Jump | Completed |
+| Landing Spark | Completed |
+| Wall Slide Spark | Completed |
+| Wall Jump Spark | Completed |
 | Cable Spark | Planned |
 | Metal Surface | Planned |
 | Rubber Surface | Planned |
@@ -775,6 +775,385 @@ flowchart LR
 
 - **Commit**: `SPARK-9 기본 이동 및 카메라 조작 구현 및 EOL(CRLF) 적용`, `SPARK-10 점프 구현 및 3D 플랫폼 조작감/가속도 튜닝`, `SPARK-11 공중 제어 구현 (AirControl 0.85f 설정)`, `SPARK-12 착지 감지 구현 및 Landing Event 핸들러 추가`, `SPARK-13 Wall Slide 구현 (벽 감지 및 속도 제어)`, `SPARK-14 Wall Jump 구현 및 Wall Slide 로직 모듈화 리팩토링`, `SPARK-15 SPARK-16 실패 영역 감지(SparkHazardZone) 및 카메라 페이드 연동 빠른 Respawn 구현`
 - **Jira Issues**: [SPARK-9](https://dalyeou.atlassian.net/browse/SPARK-9), [SPARK-10](https://dalyeou.atlassian.net/browse/SPARK-10), [SPARK-11](https://dalyeou.atlassian.net/browse/SPARK-11), [SPARK-12](https://dalyeou.atlassian.net/browse/SPARK-12), [SPARK-13](https://dalyeou.atlassian.net/browse/SPARK-13), [SPARK-14](https://dalyeou.atlassian.net/browse/SPARK-14), [SPARK-15](https://dalyeou.atlassian.net/browse/SPARK-15), [SPARK-16](https://dalyeou.atlassian.net/browse/SPARK-16) (Phase 1 전 이슈 완료 처리)
+
+---
+
+## 2026-08-07 — SparkRobot 캐릭터 애니메이션 파이프라인 조사 및 Blender 커스텀 리깅 작업
+
+**Milestone:** Pre-Production
+**Category:** Character / Art / Animation
+**Status:** In Progress
+**Branch:** feature/movement
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- Player Character(SparkRobot)에 애니메이션을 적용하기 위한 리깅 파이프라인 결정
+- 기존에 임포트된 `SK_SparkRobot` 에셋의 리깅 상태 점검 및 처리 방향 확정
+
+### 작업 내용
+
+1. **기존 에셋 상태 점검**
+   - `Content/SparkRobot/SK_SparkRobot`, `SKEL_SparkRobot`, `PHYS_SparkRobot` 확인
+   - Skeleton Tree 확인 결과 `RootNode` 하위에 `tripo_part_0~14`가 개별 메시로만 존재, 실제 관절 본(bone) 구조 없음 → 애니메이션 불가 상태로 판정
+   - 원본 FBX(`robot+3d+model.fbx`)는 Tripo3D(AI 3D 생성 툴) 산출물로, 텍스처/머티리얼만 프로젝트 컨벤션에 맞게 정리(`reorganize_sparkrobot.py`)되어 있었고 리깅은 진행된 적 없음
+2. **리깅 경로 검토**
+   - 1차로 Mixamo Auto-Rigger 시도: 파츠 분리가 관절 경계와 맞지 않아 팔/다리 리깅 정확도가 떨어지는 문제 확인
+   - Blender에서 전체 메시를 하나로 합친 뒤(`Ctrl+J`), Knife Tool과 Select Linked(`L`)를 이용해 관절 경계 기준으로 재분리 진행 → 13개 파츠로 정리 완료: `Body`, `Pelvis`, `Left/Right_UpperArm`, `Left/Right_ForeArm`, `Left/Right_Hand`, `Left/Right_Thigh`, `Left/Right_Shin`, `Left/Right_Foot`
+   - Mixamo Auto-Rigger 재시도 결과, 하드서페이스(기계 부품) 모델에 인체용 스무스 스키닝이 적용되어 어깨/목 부위가 찌그러지는 문제 발생
+3. **방향 전환: Blender 커스텀 리깅**
+   - Mixamo 대신 Blender에서 직접 Armature 생성 후 각 파츠를 해당 본에 **Bone 페어런트(리지드, 웨이트 블렌딩 없음)**로 연결하는 방식으로 전환
+   - 본 계층 구조 확정: `Pelvis`(Root) → `Spine`(+ 좌우 `UpperArm`→`ForeArm`→`Hand`), `Pelvis`의 자식으로 좌우 `Thigh`→`Shin`→`Foot`
+   - 손/발은 세부 관절(손가락 등) 없이 단일 리지드 파츠로 유지, Mixamo "No Fingers" 스켈레톤 구조와 일치시킴
+   - 어깨처럼 부모 본 중간에서 분기되는 관절은 Extrude 대신 `Shift+A`(Single Bone 추가) 후 `Parent` 필드로 수동 연결(Connected 해제)하는 방식 적용
+   - 페어런트/본 위치 오류 발생 시 `Alt+P`(Clear Parent and Keep Transformation) → 본 위치 수정 → 재페어런트 순서로 보정하는 작업 패턴 확립
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: 파츠 분리 시 트라이앵글 단위 수동 선택이 비효율적**
+  - **원인**: 스캔/생성 메시라 클린 쿼드 토폴로지가 아니어서 Edge Loop 선택이 정상 동작하지 않음
+  - **해결**: Material Preview 모드로 원본 파츠 경계 확인 → `L`(Select Linked)로 독립된 조각 즉시 선택, 이어진 부위는 Knife Tool로 관절 중간 지점에 새 절단선을 그어 분리
+- **문제 2: 어깨 볼 조인트가 절단선에 애매하게 걸쳐 보임**
+  - **원인**: X-ray 모드에서 반대편 메시 라인이 겹쳐 보여 실제로는 자르지 않은 부분이 잘린 것처럼 보이는 시각적 오인
+  - **해결**: 정면/측면 Ortho 뷰에서 X-ray 껐다 켰다 하며 실제 절단 여부 재확인
+- **문제 3: Mixamo Auto-Rigger 결과물이 애니메이션 재생 시 찌그러짐**
+  - **원인**: Mixamo의 자동 스무스 스키닝(웨이트 블렌딩)이 하드서페이스 로봇 관절에 부적합
+  - **해결(방향 전환)**: Mixamo 리깅을 폐기하고 Blender에서 파츠별 100% 리지드 Bone 페어런트로 직접 리깅
+- **문제 4: 다리/발 본이 Pelvis의 자식으로 연결되지 않고 Armature 최상위에 생성됨**
+  - **원인**: Extrude 체인 진행 중 계층 연결이 의도와 다르게 끊어짐
+  - **해결**: Edit Mode에서 해당 본의 `Parent` 속성에 `Pelvis`를 직접 지정(Connected 해제)하여 계층 정정
+
+### 결과
+
+- SparkRobot 메시가 13개 파츠(관절 경계 기준)로 정리 완료
+- Blender Armature 계층 구조 확정 및 전체 파츠 Bone 페어런트 연결 완료
+- Pose Mode 회전 테스트로 리지드 연결 상태 확인 예정 (다음 세션에서 최종 검증)
+
+### 결정
+
+- 애니메이션 리소스는 Mixamo에서 직접 받지 않고, **UE5 Mannequin 애니메이션을 IK Retargeter로 리타겟**하여 재사용하는 방향으로 확정
+- 손가락/발가락 등 세부 관절은 게임플레이 요구사항(개별 손가락 애니메이션 불필요)에 따라 만들지 않음
+- 리깅은 Blender에서 직접 제작한 커스텀 스켈레톤을 사용하고, Mixamo는 사용하지 않음
+
+### 알려진 문제
+
+- Blender 리깅 최종 회전 테스트 미완료 (다음 세션에서 확인 필요)
+- FBX Export 및 Unreal 재임포트 미진행
+- UE5 Mannequin IK Rig / IK Retargeter 매핑 작업 미착수
+
+### 다음 작업
+
+- Pose Mode에서 전체 본 회전 테스트로 리지드 페어런트 최종 검증
+- FBX Export (Apply Transform, Add Leaf Bones 해제) 후 `Content/Spark/Characters`에 재임포트
+- SparkRobot 커스텀 스켈레톤용 IK Rig 생성
+- UE5 Mannequin IK Rig와 IK Retargeter 매핑 (Pelvis/Spine/UpperArm/ForeArm/Hand/Thigh/Shin/Foot 체인)
+- Mannequin 기본 애니메이션(Idle/Walk/Run/Jump) 리타겟 테스트
+- Animation Blueprint 생성 및 `BP_SparkCharacter`에 Skeletal Mesh + AnimBP 연결
+
+### 관련 자료
+
+- Related Document: [09_Asset_List.md](./09_Asset_List.md)
+
+---
+
+## 2026-08-11 — Phase 1 Core Prototype: 임시 Point Light 생성 로직 구현 (USparkComponent)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Spark / Character / Architecture  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-20  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 이동 및 이벤트를 수반한 Spark 발생 시 월드에 시각적 피드백을 제공할 임시 Point Light 동적 스폰 기능 구현
+- 아키텍처 규칙(`Docs/02_Architecture.md`)을 준수하는 독립 `USparkComponent` (Actor Component) 신규 설계
+- 수명(LifeSpan) 기반 자동 소멸 로직을 적용하여 라이팅 자원 낭비 없는 독립 빛 잔상 연출 검증
+
+### 작업 내용
+
+1. **`USparkComponent` (Actor Component) 신규 구현**:
+   - `Source/Spark/Components/SparkComponent.h` 및 `SparkComponent.cpp` 작성
+   - `UCLASS(ClassGroup=(Custom), meta=(BlueprintSpawnableComponent))` 컴포넌트 구조 선언
+   - `SpawnSparkLight(const FVector& Location, float Intensity, float LightRadius, float Duration)` BlueprintCallable 함수 작성
+   - `World->SpawnActor<APointLight>()`를 통한 동적 조명 소환 구현 및 `SetLifeSpan(Duration)`을 활용한 수명 관리 적용
+2. **`ASparkCharacter` 연동 및 착지(`HandleLanded`) 테스트**:
+   - `ASparkCharacter` 생성자에서 `USparkComponent` 생성 및 등록
+   - 착지 감지 핸들러 `HandleLanded(Hit)` 호출 시 `SparkComponent->SpawnSparkLight()`를 실행하도록 바인딩하여 착지 지점에 조명이 불꽃처럼 남는 기능 검증
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: `SparkComponent.h` 컴파일 시 BlueprintReadWrite 지정자 관련 에러**
+  - **원인**: `private:` 변수에 `BlueprintReadWrite` 지정자를 사용하여 UHT(Unreal Header Tool) 캡슐화 규칙 위반.
+  - **해결**: `BlueprintReadOnly`로 수정하여 리플렉션 규칙 정상화.
+- **문제 2: `APointLight`에서 `GetPointLightComponent()` 호출 시 C2039 심볼 미존재 컴파일 에러**
+  - **원인**: Unreal Engine 5.5에서 `APointLight` Actor는 `GetPointLightComponent()` 메서드 대신 `PointLightComponent` 멤버 변수(포인터)를 제공함.
+  - **해결**: `LightActor->PointLightComponent` 멤버 변수 직접 참조로 수정.
+- **문제 3: `TObjectPtr<UPointLightComponent>` 템플릿 인수 추론 불가 (C2783) 컴파일 에러**
+  - **원인**: UE5의 `TObjectPtr` 스마트 포인터를 `UPointLightComponent*` 원시 포인터로 암시적 변환하려 할 때 템플릿 추론 실패.
+  - **해결**: `LightActor->PointLightComponent.Get()`을 사용하여 원시 포인터를 명시적으로 꺼내도록 수정.
+
+### 결과
+
+- `USparkComponent` 컴포넌트 모듈화 구현 및 `ASparkCharacter` 부착 완료
+- 지면 착지(`Landed`) 순간 발밑 위치(`Hit.ImpactPoint`)에 주황빛 Point Light가 팡 켜지고 지정된 수명(1.5초) 후 월드에서 자동 소멸되는 시각 피드백 동작 실기 검증 완료
+
+### 관련 Commit 및 Issue
+
+- **Jira Issue**: [SPARK-20](https://dalyeou.atlassian.net/browse/SPARK-20) (완료 처리)
+
+---
+
+## 2026-08-12 — Phase 1 Core Prototype: Landing Spark Niagara 파티클 제작 및 USparkComponent 애셋 손상 트러블슈팅
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** VFX / Lighting / Spark / Bug Fix  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 착지(Landing) Spark 전용 Niagara 파티클(`NS_Spark_Landing`) 제작
+- 기존 임시 Point Light(`SpawnSparkLight`)에 자연스러운 잔광 페이드 추가
+- Niagara 파티클과 Point Light를 캐릭터 착지 이벤트에 실제로 연동해 실기 테스트
+
+### 작업 내용
+
+1. **`NS_Spark_Landing` Niagara System 제작**
+   - Fountain 템플릿 기반으로 시작, `Spawn Rate` → `Spawn Burst Instantaneous`(SpawnCount 20)로 전환해 연속 분사를 순간 버스트로 변경
+   - `Shape Location`을 Sphere → Cone(45도, 위쪽 방향)으로 변경해 착지 지점에서 반구형으로 튀는 형태 구현
+   - `Initialize Particle`에서 Lifetime(0.15~0.5초), Sprite Size, Color(주황 계열) 설정
+   - `Light Renderer` 추가해 파티클 자체에 은은한 발광 부여 (Radius Scale, Color Add 값을 과도하게 키우면 파티클 여러 개의 빛이 뭉쳐 하나의 광원처럼 보이는 문제를 확인하고 적정 범위로 조정)
+2. **`SpawnSparkLight`(Point Light) 잔광 페이드 구현**
+   - `FTimerManager` 기반 반복 타이머로 Intensity를 `(1 - 진행률)³` 커브로 감소시켜 "빠르게 감소" 느낌의 자연스러운 잔광 구현
+   - `TWeakObjectPtr`로 라이트 컴포넌트를 안전하게 참조해 조기 파괴 시 타이머가 안전하게 정리되도록 처리
+3. **`USparkComponent` → `USparkComponentV2` → `USparkComponent` 재생성**
+   - (아래 문제 항목 참고) 기존 `SparkComponent.h/.cpp` 파일이 원인 불명으로 손상되어 Details 패널이 완전히 비는 문제 발생
+   - 엔진 마법사(Add C++ Class)로 새 컴포넌트(`SparkComponentV2`)를 생성해 기존 기능(Point Light + Niagara 파티클 스폰)을 그대로 이전
+   - 최종적으로 클래스/파일명을 다시 `USparkComponent`/`SparkComponent.h/.cpp`로 리네임하여 정리
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: `BP_SparkCharacter`의 `SparkComponent` Details 패널이 완전히 비어 보임 (검색창조차 안 뜸)**
+  - **가설 1 (기각)**: Live Coding 캐시 문제 → 사용자는 Live Coding을 쓰지 않고 항상 Rider/에디터 컴파일 버튼으로 빌드했음이 확인되어 기각
+  - **가설 2 (기각)**: `UNiagaraSystem` 타입의 하드 레퍼런스가 Details 커스터마이제이션을 깨뜨리는 문제 → `TSoftObjectPtr`로 바꿔도 동일하게 재현되어 기각
+  - **가설 3 (기각)**: `Niagara` 모듈이 `Build.cs`에서 Private 의존성으로만 선언되어 퍼블릭 헤더 노출 타입 리플렉션이 실패 → Public으로 옮겨도 증상 동일하여 기각
+  - **원인 확정**: 새로 만든 대조군 블루프린트(`BP_SparkCharacter_TEST`)에서는 동일한 컴포넌트가 정상적으로 보였음 → 기존 `BP_SparkCharacter` 애셋 자체(SCS/CDO 인스턴스 데이터)가 반복된 구조 변경과 재컴파일 과정에서 손상된 것으로 확정
+  - **후속 문제**: 대조군 블루프린트도 컴포넌트의 프로퍼티 구성을 계속 바꿔가며 재컴파일하자 동일한 증상으로 다시 손상됨 → **네이티브 컴포넌트의 멤버 구성(타입 추가/삭제, 클래스명 변경)을 반복적으로 바꾸는 것 자체가 블루프린트의 캐시된 인스턴스 데이터를 깨뜨리는 원인**으로 판단
+  - **해결**: 컴포넌트 구조가 확정될 때마다 기존 블루프린트를 재사용하지 않고 **새 블루프린트 애셋을 만들어 검증**하는 방식으로 우회. 최종적으로 새 블루프린트에서 정상 동작을 확인한 뒤 정식 이름으로 리네임
+- **문제 2: 니가라 Light Renderer의 빛이 파티클 개별 위치가 아니라 한 곳에 뭉쳐 보임**
+  - **원인**: `Radius Scale`(400 → 테스트 중 100000까지 상승)과 `Color Add`(1000/1000/1000) 값이 파티클 크기에 비해 지나치게 커서, 여러 파티클의 빛이 겹쳐 하나의 광원처럼 보임
+  - **해결**: Radius Scale을 60~100, Color Add를 10 내외로 낮춰 파티클 각각의 위치에서 반짝이는 형태로 조정
+- **문제 3: 어두운 배경에서 Point Light의 밝기가 체감되지 않음**
+  - **원인**: `World->SpawnActor<APointLight>()`로 생성한 라이트의 기본 Mobility가 Static/Stationary로 생성되어, 런타임에 동적으로 켜지는 라이트임에도 즉시 반영되지 않음
+  - **해결**: `LightComponent->SetMobility(EComponentMobility::Movable)`을 명시적으로 호출하도록 수정
+- **문제 4: 착지 지점 주변 바닥이 의도한 주황색이 아니라 청색으로 보임**
+  - **원인 조사**: `DefaultLightColor`를 극단적인 마젠타로 바꿔 테스트한 결과 발밑 근처 바닥은 정확히 마젠타로 물들었음 → Point Light 색상 처리는 정상이며, 화면에서 보이던 청색은 레벨의 기본 앰비언트/스카이라이트(환경의 Blue Gray 팔레트, `05_Art_Direction.md` 기준) 때문임을 확인. 스파크 라이트와는 무관한 정상 동작으로 결론
+
+### 결과
+
+- `NS_Spark_Landing` Niagara 파티클과 `SpawnSparkLight` Point Light가 `HandleLanded()`에서 함께 스폰되어, 착지 시 주황색 스파크 파티클 + 국소적으로 밝은 조명 + 자연스러운 잔광 페이드가 동시에 동작하는 것을 실기 확인
+- 착지 지점 근처는 설정한 색(주황)으로 선명하게 보이고, 그 밖의 환경은 의도한 대로 저채도 Blue Gray를 유지해 "Contrast over Detail" 아트 원칙에 부합하는 결과를 얻음
+
+### 결정
+
+- **네이티브 Actor Component의 멤버 구조(프로퍼티/함수 시그니처/클래스명)를 확정하기 전까지는, 검증용 블루프린트 애셋을 매번 새로 만들어 확인**한다. 기존 블루프린트를 재사용하며 반복 검증하지 않는다.
+- Niagara 파티클의 발광(Light Renderer)은 "터진 순간의 시각적 반짝임" 정도로만 담당하고, 실제로 주변을 밝히는 역할은 C++ Point Light(`SpawnSparkLight`)가 전담하는 구조로 역할을 분리한다.
+
+### 알려진 문제
+
+- `USparkComponent` 애셋 손상의 근본 원인(엔진/UHT 버그인지, 특정 편집 시퀀스의 우연인지)은 명확히 규명되지 않음. 향후 다른 컴포넌트에서 유사 증상 재발 시 이 로그를 참고해 "새 블루프린트로 검증" 절차를 우선 적용한다.
+- 니가라 파티클의 Sprite Renderer용 커스텀 머티리얼(`M_Spark_Electric`)은 아직 실제 적용 전이며, 현재는 엔진 기본 파티클 머티리얼로 테스트 중
+
+### 다음 작업
+
+- Wall Slide / Wall Jump / Cable Interaction용 Niagara 파티클 추가 제작 (Landing과 동일한 구조에서 파라미터만 변경)
+- 커스텀 전기 텍스처 확보 후 `M_Spark_Electric` 머티리얼 실제 적용
+- Physical Material 기반 Surface 판정 구현 후 Surface별 Spark 반응 연동
+
+### 관련 자료
+
+- **Jira Issue**: [SPARK-21](https://dalyeou.atlassian.net/browse/SPARK-21) (완료 처리)
+- Related Document: [05_Art_Direction.md](./05_Art_Direction.md)
+
+---
+
+## 2026-08-12 — Phase 1 Core Prototype: Landing Spark 이벤트 정밀 구현 및 낙하 충격량 연동 (SPARK-17)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Spark / Character / VFX / Lighting  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-17  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 캐릭터 착지 시 발생하는 Landing Spark 연출을 정식 이벤트 구조(`TriggerLandingSpark`)로 모듈화
+- 착지 직전 수직 낙하 속도(`FallSpeed`)에 비례한 조명 밝기(`Intensity`), 범위(`Radius`), 지속시간(`Duration`) 가변 조절 시스템 구현
+- 표면 법선(`ImpactNormal`) 기반 파티클 축 정렬 및 로봇 발바닥 위치 정확한 스폰 오프셋 보정
+
+### 작업 내용
+
+1. **`USparkComponent::TriggerLandingSpark` 정식 이벤트 작성**:
+   - `TriggerLandingSpark(Location, Normal, FallSpeed)` 함수 작성 및 C++ 모듈화
+   - 낙하 속도 크기(`SpeedMagnitude`) 및 제자리 점프 기준 문턱값(`450.0f`) 기반 ExcessSpeed 연산
+   - `GDD` 규정(0.8s ~ 1.2s) 내 가변 지속시간(`LightDuration`), 조명 밝기(`6000 ~ 30000`), 조명 범위(`500 ~ 2000`) 튜닝
+   - `FRotationMatrix::MakeFromZ(Normal).Rotator()`를 통한 표면 법선 기반 Niagara 파티클 방출 축 정렬
+2. **`ASparkCharacter::HandleLanded` 연동 및 발바닥 위치 보정**:
+   - `Super::Landed(Hit)` 실행 바로 직전 `GetCharacterMovement()->Velocity.Z`를 추출하여 착지 충격량 손실 없는 낙하 속도 가로채기 적용 (Tick 사용 없이 100% 이벤트 기반 구현으로 컨벤범 준수)
+   - `Hit.ImpactPoint` 부정확 시 캡슐 반높이(`GetScaledCapsuleHalfHeight()`) 차감을 통한 발바닥 접촉 위치(`LandingLocation`) 정밀 보정
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: `Landed()` 시점 `GetVelocity().Z`가 지면 마찰로 인해 이미 감속되어 제자리 점프 수치로 고정됨**
+  - **원인**: 부모 `Super::Landed()` 내부에서 속도 벡터가 정지/감속 처리된 후 핸들러가 실행됨.
+  - **해결**: `Landed(Hit)` 오버라이드 함수 맨 첫 줄에서 `Super::Landed` 호출 직전 속도를 수동 가로채기 처리.
+- **문제 2: 파티클이 특정 한쪽 방향(-Y축)으로만 쏠려 방출됨**
+  - **원인**: `Normal.Rotation()` 사용 시 `UpVector(0,0,1)`이 Pitch +90도로 회전하여 Niagara 기본 +Z 방출 축과 90도 틀어짐.
+  - **해결**: `FRotationMatrix::MakeFromZ(Normal).Rotator()`를 사용해 표면 법선을 +Z 방출 축으로 정확하게 회전 변환.
+- **문제 3: 파티클이 바닥이 아닌 로봇 몸통/배 위치에서 튀어나옴**
+  - **원인**: `Hit.ImpactPoint`가 캡슐 중앙 피봇 근처로 전달되는 현상.
+  - **해결**: 캐릭터 위치에서 `CapsuleHalfHeight`를 뺀 정밀 발바닥 좌표로 보정 스폰.
+
+### 결과
+
+- 제자리 점프 시 **0.80초 / 6000 밝기 / 500 범위** 기본 연출 정확히 고정
+- 높은 구조물에서 낙하 시 높이에 비례하여 **최대 1.20초 / 30000 밝기 / 2000 범위**까지 대폭 시원하게 비춰지는 가변 시각 연출 검증 완료
+- 로봇 발바닥 지면 접촉면에서 표면 각도에 맞게 튀어나오는 고품질 Landing Spark 연출 완성
+
+### 관련 Commit 및 Issue
+
+- **Jira Issue**: [SPARK-17](https://dalyeou.atlassian.net/browse/SPARK-17) (완료 처리)
+
+---
+
+## 2026-08-12 — Phase 1 Core Prototype: Wall Slide Spark 및 Wall Jump Spark 구현 (SPARK-18, SPARK-19)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Spark / Character / VFX / Lighting  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-18, SPARK-19  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 수직 벽면을 타고 미끄러져 내리는 동안(`bIsWallSliding`) 미세한 마찰 Spark 불꽃과 라이트가 연속 발생하는 Wall Slide Spark 구현 (`SPARK-18`)
+- 벽을 차고 반사 솟구치는 순간(`HandleWallJump`) 강한 파티클 폭발 및 순간 밝은 조명이 터지는 Wall Jump Spark 구현 (`SPARK-19`)
+- 감지된 벽면 법선(`CurrentWallNormal`)에 부합하는 파티클 스폰 회전 정렬 적용
+
+### 작업 내용
+
+1. **`USparkComponent` Wall 연출 전용 이벤트 확장**:
+   - `TriggerWallSlideSpark(Location, WallNormal)`: 은은한 마찰 조명(`4000.0f` 밝기 / `400.0f` 반지름 / `0.4s` 유지) 및 `WallSlideSparkSystem` (또는 fallback `LandingSparkSystem`) 연동
+   - `TriggerWallJumpSpark(Location, WallNormal)`: 순간 강한 조명(`15000.0f` 밝기 / `12000.0f` 반지름 / `1.0s` 유지) 및 `WallJumpSparkSystem` 연동
+   - `FRotationMatrix::MakeFromZ(WallNormal).Rotator()`를 통한 벽면 법선 기반 방출 방향 정렬
+2. **`ASparkCharacter` 연동 및 방출 주기 제어**:
+   - `CheckWallSlide()` 내부에서 0.15초 타이머 간격(`LastWallSlideSparkTime`)으로 `TriggerWallSlideSpark()`를 부드럽게 연속 트리거
+   - `HandleWallJump()` 호출 시 벽면 트레이스 지점(`ImpactPoint`, `ImpactNormal`)을 포착하여 `TriggerWallJumpSpark()` 즉시 트리거
+
+### 결과
+
+- 벽면을 타고 내릴 때 `0.15초` 간격으로 벽 접촉면을 따라 마찰 스파크가 연속 발생하고 미세한 잔광이 미끄러지는 시각 효과 검증 완료
+- 벽을 팍 차고 튕겨 나가는 시점에 벽면 법선 반사 방향으로 강한 스파크 파티클과 시원한 조명 폭발 연출 확인 완료
+
+### 관련 Commit 및 Issue
+
+- **Jira Issue**: [SPARK-18](https://dalyeou.atlassian.net/browse/SPARK-18) (완료 처리)
+- **Jira Issue**: [SPARK-19](https://dalyeou.atlassian.net/browse/SPARK-19) (완료 처리)
+
+---
+
+## 2026-08-12 — Phase 1 Core Prototype: Data-Driven Spark 연출 및 강도 분리 아키텍처 구현 (SPARK-23)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Spark / Data / Architecture  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-23  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- C++ 코드 내에 하드코딩되어 있던 이벤트별 조명 밝기, 반지름, 지속시간 및 파티클 에셋을 데이터 기반(Data-Driven) 구조로 완전 분리
+- `Docs/02_Architecture.md` 규칙을 준수하는 `USparkEffectDataAsset` (Primary Data Asset) 및 구조체 설계
+- C++ 재컴파일 없이 언리얼 에디터에서 이벤트별 연출 파라미터를 실시간 튜닝할 수 있는 확장성 확보 및 컴포넌트 레거시 속성 정리
+
+### 작업 내용
+
+1. **Spark 연출 데이터 구조 설계**:
+   - `Source/Spark/Data/SparkEffectData.h` 작성
+   - `FSparkEffectData` USTRUCT 선언: `LightIntensity`, `LightRadius`, `LightDuration`, `ParticleSystem` 데이터 통합 캡슐화
+   - `USparkEffectDataAsset` UPrimaryDataAsset 클래스 구현: `LandingData`, `WallSlideData`, `WallJumpData` 이벤트 세트 통합 관리
+2. **`USparkComponent` 데이터 기반 리팩토링 및 레거시 제거**:
+   - `SparkEffectDataAsset` 포인터 변수 추가 및 `SparkComponent.cpp` 이벤트 함수들(`TriggerLandingSpark`, `TriggerWallSlideSpark`, `TriggerWallJumpSpark`)이 데이터 에셋의 수치를 우선 참조하도록 개편
+   - 데이터 에셋 누락 시에 대비한 안전한 C++ 기본 fallback 로직 유지
+   - `SparkComponent` 내부의 중복 파티클 프로퍼티(`LandingSparkSystem`, `WallSlideSparkSystem`, `WallJumpSparkSystem`) 및 레거시 함수(`SpawnSparkParticle`) 완벽 제거하여 컴포넌트 디테일 패널 경량화
+3. **에셋 생성 및 컴포넌트 바인딩**:
+   - `Content/Spark/Data/` 위치에 `DA_SparkEffect_Default` (Data Asset) 에셋 생성 (Naming Convention `DA_` Prefix 준수)
+   - `BP_SparkCharacter`의 `SparkComponent`에 `DA_SparkEffect_Default` 바인딩 완료
+
+### 결과
+
+- Landing(`6000/500/0.8s`), Wall Slide(`4000/400/0.4s`), Wall Jump(`15000/1200/1.0s`) 등 각 이벤트별 Spark 연출 강도와 나이아가라 파티클이 에셋 하나로 완벽하게 데이터 분리됨
+- 에디터 상에서 `DA_SparkEffect_Default` 내 수치를 조절하는 것만으로 C++ 빌드 없이 실시간 밸런스 및 연출 수정 가능함을 검증 완료
+
+### 관련 Commit 및 Issue
+
+- **Jira Issue**: [SPARK-23](https://dalyeou.atlassian.net/browse/SPARK-23) (완료 처리)
+- Related Document: [02_Architecture.md](./02_Architecture.md), [07_Coding_Convention.md](./07_Coding_Convention.md)
+
+---
+
+## 2026-08-13 — Phase 1 Core Prototype: Spark Component 리팩토링 및 지면 스폰 높이 정밀 보정 (SPARK-23)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Spark / Component / Refactoring / VFX  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-23  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- `USparkComponent` 내 반복되던 조명/나이아가라 파티클 스폰 로직 및 타이머 잔광 제어를 보조 헬퍼 함수(`ExecuteSparkFX`, `StartLightFadeOut`)로 모듈화하여 단일 책임 원칙(SRP) 준수
+- 착지 전용 데이터 구조체(`FLandingSparkEffectData`)와 일반 이벤트 구조체(`FSparkEffectData`)를 계층적으로 분리하여 에디터 디테일 패널에서 불필요한 `Max` 수치 노출 방지
+- 착지 시 `Hit.ImpactPoint` 오차로 인해 파티클이 허리/골반 높이에서 뜨는 문제 해결 및 캡슐 하단(`CapsuleBottom.Z`) 기반 정밀 발바닥 좌표 강제 보정
+
+### 작업 내용
+
+1. **`USparkComponent` 모듈화 리팩토링**:
+   - `ExecuteSparkFX(EffectData, Location, Normal)` 보조 함수 구현: 조명 스폰(`SpawnSparkLight`)과 표면 법선 축 정렬 Niagara 파티클 스폰을 통합 처리하여 `TriggerLandingSpark`, `TriggerWallSlideSpark`, `TriggerWallJumpSpark` 본문 중복 코드 100% 제거
+   - `StartLightFadeOut(LightComponent, Intensity, Duration)` 보조 함수 분리: `SpawnSparkLight()` 내 중첩된 `if` 들여쓰기를 제거하고 잔광 세제곱 감쇄 람다 타이머 로직을 전담 캡슐화
+2. **에디터 UI 명확화를 위한 구조체 이중화 (`SparkEffectData.h`)**:
+   - `FSparkEffectData`: 단일 수치(`LightIntensity`, `LightRadius`, `LightDuration`, `ParticleSystem`) 전용 기본 구조체 (Wall Slide / Wall Jump 용)
+   - `FLandingSparkEffectData`: `FSparkEffectData`를 상속받아 낙하 속도 가변용 `MaxLightIntensity`, `MaxLightRadius`, `MaxLightDuration`을 확장 (Landing 용)
+   - `USparkEffectDataAsset`: `LandingData`에는 `FLandingSparkEffectData`를 적용하고, `WallSlideData`/`WallJumpData`에는 `FSparkEffectData`를 적용하여 에디터 디테일 패널상 불필요한 Max 필드 숨김 완료
+3. **발바닥 지면 스폰 좌표 정밀 강제 보정 (`SparkCharacter.cpp`)**:
+   - `ASparkCharacter::HandleLanded()` 내 `Hit.ImpactPoint`가 캡슐 중앙 피봇 근처로 수급되는 현상 포착
+   - `CapsuleBottom = GetActorLocation() - FVector(0, 0, CapsuleHalfHeight)`를 기점으로 `LandingLocation.Z`를 `FMath::Min(Hit.ImpactPoint.Z, CapsuleBottom.Z)`로 보정하여 발바닥 바닥면에 조명과 Niagara 파티클이 오차 없이 정확히 밀착 스폰되도록 정밀 수정
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: C++ 구조체 계층 변경 후 디테일 패널에서 Data Asset이 `None`으로 표시되고 목록에서 사라짐**
+  - **원인**: C++ 구조체 변경 시 기존 바이너리 직렬화 데이터와 클래스 캐시가 깨져 발생.
+  - **해결**: 에디터 재시작 후 깨진 에셋 삭제 ➔ `USparkEffectDataAsset` 기반으로 `DA_SparkEffect_Default` 재생성 ➔ `BP_SparkCharacter` 재바인딩으로 정상 복구.
+- **문제 2: 파티클이 발바닥이 아닌 캐릭터 허리/배 위쪽에서 스폰됨**
+  - **원인**: `Hit.ImpactPoint`가 0이 아니어 기존 예외 처리를 우회했으나, 원시 `ImpactPoint` 자체의 높이가 캡슐 중앙 높이 근처로 유효 반환됨.
+  - **해결**: `LandingLocation.Z`를 캡슐 반높이 차감 좌표(`CapsuleBottom.Z`)로 강제 하강 보정.
+
+### 결과
+
+- `USparkComponent` 코드 길이가 180줄에서 150줄 이하로 줄어들고 중복 로직이 깔끔하게 정돈됨
+- 에디터 데이터 에셋 디테일 패널에서 Wall Slide/Wall Jump 항목의 불필요한 Max 수치가 깔끔하게 가려져 기획 편의성 향상
+- 착지 시 조명과 스파크 파티클이 위치 오차 없이 발바닥 바닥 지면 표면에서 정밀하게 튀어나오는 연출 확인 완료
+
+### 관련 Commit 및 Issue
+
+- **Jira Issue**: [SPARK-23](https://dalyeou.atlassian.net/browse/SPARK-23) (완료 처리)
 
 ---
 

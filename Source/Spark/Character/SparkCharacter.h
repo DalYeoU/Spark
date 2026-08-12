@@ -6,6 +6,7 @@
 
 class USpringArmComponent;
 class UCameraComponent;
+class USparkComponent;
 struct FInputActionValue;
 
 /**
@@ -58,7 +59,7 @@ protected:
     virtual void Landed(const FHitResult& Hit) override;
     
     // 착지 이벤트 발생 시 세부 로직 및 피드백 처리 핸들러
-    void HandleLanded(const FHitResult& Hit);
+    void HandleLanded(const FHitResult& Hit, float FallSpeed = 0.0f);
     
     // 전방 벽면 감지 및 wall Slide 조건 검사
     void CheckWallSlide();
@@ -126,4 +127,12 @@ private:
     // 리스폰 직후 화면이 검은색에서 밝아지는 데 걸리는 시간
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float RespawnFadeInDuration = 2.0f;
+    
+    // Spark 연출 및 라이트 생성을 담당하는 컴포넌트
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spark", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<USparkComponent> SparkComponent;
+    
+    // Wall Slide Spark 방출 타이밍 조절용 변수
+    float LastWallSlideSparkTime = 0.0f;
+    
 };

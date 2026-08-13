@@ -905,19 +905,21 @@ flowchart LR
 
 ---
 
-## 2026-08-12 — Phase 1 Core Prototype: Landing Spark Niagara 파티클 제작 및 USparkComponent 애셋 손상 트러블슈팅
+## 2026-08-12 — Phase 1 Core Prototype: Landing/Wall Slide/Wall Jump Spark 이벤트 구현 및 Data-Driven 아키텍처 개편 (SPARK-17, SPARK-18, SPARK-19, SPARK-20, SPARK-21, SPARK-23)
 
 **Milestone:** Phase 1 — Core Prototype  
-**Category:** VFX / Lighting / Spark / Bug Fix  
+**Category:** VFX / Lighting / Spark / Architecture / Bug Fix  
 **Status:** Completed  
 **Branch:** feature/movement  
+**Issues:** SPARK-17, SPARK-18, SPARK-19, SPARK-20, SPARK-21, SPARK-23  
 **Engine:** Unreal Engine 5.5.4
 
 ### 목표
 
-- 착지(Landing) Spark 전용 Niagara 파티클(`NS_Spark_Landing`) 제작
-- 기존 임시 Point Light(`SpawnSparkLight`)에 자연스러운 잔광 페이드 추가
-- Niagara 파티클과 Point Light를 캐릭터 착지 이벤트에 실제로 연동해 실기 테스트
+- 임시 Point Light 스폰(`SpawnSparkLight`)에 자연스러운 잔광 페이드 추가 및 착지(Landing) Spark 전용 Niagara 파티클(`NS_Spark_Landing`) 제작
+- 캐릭터 착지 시 발생하는 Landing Spark 연출을 정식 이벤트 구조(`TriggerLandingSpark`)로 모듈화하고, 착지 직전 수직 낙하 속도(`FallSpeed`)에 비례한 조명 밝기/범위/지속시간 가변 조절 시스템 구현
+- 벽면을 타고 미끄러지는 동안(Wall Slide)과 벽을 차고 튕겨 나가는 순간(Wall Jump)에 대응하는 Spark 연출 구현
+- C++ 코드에 하드코딩되어 있던 이벤트별 연출 수치와 파티클 에셋을 Data-Driven 구조(`USparkEffectDataAsset`)로 완전 분리
 
 ### 작업 내용
 
@@ -933,6 +935,23 @@ flowchart LR
    - (아래 문제 항목 참고) 기존 `SparkComponent.h/.cpp` 파일이 원인 불명으로 손상되어 Details 패널이 완전히 비는 문제 발생
    - 엔진 마법사(Add C++ Class)로 새 컴포넌트(`SparkComponentV2`)를 생성해 기존 기능(Point Light + Niagara 파티클 스폰)을 그대로 이전
    - 최종적으로 클래스/파일명을 다시 `USparkComponent`/`SparkComponent.h/.cpp`로 리네임하여 정리
+4. **`USparkComponent::TriggerLandingSpark` 정식 이벤트 작성 (SPARK-17)**:
+   - `TriggerLandingSpark(Location, Normal, FallSpeed)` 함수 작성 및 C++ 모듈화
+   - 낙하 속도 크기(`SpeedMagnitude`) 및 제자리 점프 기준 문턱값(`450.0f`) 기반 ExcessSpeed 연산
+   - `GDD` 규정(0.8s ~ 1.2s) 내 가변 지속시간(`LightDuration`), 조명 밝기(`6000 ~ 30000`), 조명 범위(`500 ~ 2000`) 튜닝
+   - `FRotationMatrix::MakeFromZ(Normal).Rotator()`를 통한 표면 법선 기반 Niagara 파티클 방출 축 정렬
+5. **`ASparkCharacter::HandleLanded` 연동 및 발바닥 위치 보정 (SPARK-17)**:
+   - `Super::Landed(Hit)` 실행 바로 직전 `GetCharacterMovement()->Velocity.Z`를 추출하여 착지 충격량 손실 없는 낙하 속도 가로채기 적용 (Tick 사용 없이 100% 이벤트 기반 구현)
+   - `Hit.ImpactPoint` 부정확 시 캡슐 반높이(`GetScaledCapsuleHalfHeight()`) 차감을 통한 발바닥 접촉 위치(`LandingLocation`) 정밀 보정
+6. **`USparkComponent` Wall 연출 전용 이벤트 확장 (SPARK-18, SPARK-19)**:
+   - `TriggerWallSlideSpark(Location, WallNormal)`: 은은한 마찰 조명(`4000.0f` 밝기 / `400.0f` 반지름 / `0.4s` 유지) 연동
+   - `TriggerWallJumpSpark(Location, WallNormal)`: 순간 강한 조명(`15000.0f` 밝기 / `1200.0f` 반지름 / `1.0s` 유지) 연동
+   - `CheckWallSlide()` 내부에서 0.15초 타이머 간격(`LastWallSlideSparkTime`)으로 `TriggerWallSlideSpark()`를 부드럽게 연속 트리거, `HandleWallJump()` 호출 시 `TriggerWallJumpSpark()` 즉시 트리거
+7. **Data-Driven Spark 연출 파라미터 분리 (SPARK-23)**:
+   - `Source/Spark/Data/SparkEffectData.h`에 `FSparkEffectData` 구조체 및 `USparkEffectDataAsset`(UPrimaryDataAsset) 작성. `LandingData`/`WallSlideData`/`WallJumpData` 통합 관리
+   - `SparkComponent` 내부에 하드코딩되어 있던 수치들을 `SparkEffectDataAsset`에서 동적으로 읽어오도록 개편 (에셋 누락 대비 C++ fallback 유지)
+   - 중복 파티클 프로퍼티 3종 및 레거시 함수(`SpawnSparkParticle`) 완전 제거하여 컴포넌트 디테일 패널 경량화
+   - `Content/Spark/Data/DA_SparkEffect_Default` 생성 및 `BP_SparkCharacter` 바인딩 완료
 
 ### 문제 및 해결 (Troubleshooting)
 
@@ -951,11 +970,22 @@ flowchart LR
   - **해결**: `LightComponent->SetMobility(EComponentMobility::Movable)`을 명시적으로 호출하도록 수정
 - **문제 4: 착지 지점 주변 바닥이 의도한 주황색이 아니라 청색으로 보임**
   - **원인 조사**: `DefaultLightColor`를 극단적인 마젠타로 바꿔 테스트한 결과 발밑 근처 바닥은 정확히 마젠타로 물들었음 → Point Light 색상 처리는 정상이며, 화면에서 보이던 청색은 레벨의 기본 앰비언트/스카이라이트(환경의 Blue Gray 팔레트, `05_Art_Direction.md` 기준) 때문임을 확인. 스파크 라이트와는 무관한 정상 동작으로 결론
+- **문제 5: `Landed()` 시점 `GetVelocity().Z`가 지면 마찰로 인해 이미 감속되어 제자리 점프 수치로 고정됨**
+  - **원인**: 부모 `Super::Landed()` 내부에서 속도 벡터가 정지/감속 처리된 후 핸들러가 실행됨.
+  - **해결**: `Landed(Hit)` 오버라이드 함수 맨 첫 줄에서 `Super::Landed` 호출 직전 속도를 수동 가로채기 처리.
+- **문제 6: 파티클이 특정 한쪽 방향(-Y축)으로만 쏠려 방출됨**
+  - **원인**: `Normal.Rotation()` 사용 시 `UpVector(0,0,1)`이 Pitch +90도로 회전하여 Niagara 기본 +Z 방출 축과 90도 틀어짐.
+  - **해결**: `FRotationMatrix::MakeFromZ(Normal).Rotator()`를 사용해 표면 법선을 +Z 방출 축으로 정확하게 회전 변환.
+- **문제 7: 파티클이 바닥이 아닌 로봇 몸통/배 위치에서 튀어나옴**
+  - **원인**: `Hit.ImpactPoint`가 캡슐 중앙 피봇 근처로 전달되는 현상.
+  - **해결**: 캐릭터 위치에서 `CapsuleHalfHeight`를 뺀 정밀 발바닥 좌표로 보정 스폰.
 
 ### 결과
 
 - `NS_Spark_Landing` Niagara 파티클과 `SpawnSparkLight` Point Light가 `HandleLanded()`에서 함께 스폰되어, 착지 시 주황색 스파크 파티클 + 국소적으로 밝은 조명 + 자연스러운 잔광 페이드가 동시에 동작하는 것을 실기 확인
-- 착지 지점 근처는 설정한 색(주황)으로 선명하게 보이고, 그 밖의 환경은 의도한 대로 저채도 Blue Gray를 유지해 "Contrast over Detail" 아트 원칙에 부합하는 결과를 얻음
+- 제자리 점프 시 **0.80초 / 6000 밝기 / 500 범위** 기본 연출, 높은 곳 낙하 시 최대 **1.20초 / 30000 밝기 / 2000 범위**까지 가변 연출 검증 완료
+- 벽면을 타고 내릴 때 0.15초 간격 마찰 스파크 연속 발생, 벽을 차고 튕겨 나가는 시점 강한 스파크 폭발 연출 확인 완료
+- Landing/Wall Slide/Wall Jump 각 이벤트별 Spark 연출 강도와 나이아가라 파티클이 `DA_SparkEffect_Default` 에셋 하나로 완전히 데이터 분리되어, 에디터 수치 조절만으로 C++ 빌드 없이 실시간 밸런싱 가능함을 검증 완료
 
 ### 결정
 
@@ -975,136 +1005,8 @@ flowchart LR
 
 ### 관련 자료
 
-- **Jira Issue**: [SPARK-21](https://dalyeou.atlassian.net/browse/SPARK-21) (완료 처리)
-- Related Document: [05_Art_Direction.md](./05_Art_Direction.md)
-
----
-
-## 2026-08-12 — Phase 1 Core Prototype: Landing Spark 이벤트 정밀 구현 및 낙하 충격량 연동 (SPARK-17)
-
-**Milestone:** Phase 1 — Core Prototype  
-**Category:** Spark / Character / VFX / Lighting  
-**Status:** Completed  
-**Branch:** feature/movement  
-**Issues:** SPARK-17  
-**Engine:** Unreal Engine 5.5.4  
-
-### 목표
-
-- 캐릭터 착지 시 발생하는 Landing Spark 연출을 정식 이벤트 구조(`TriggerLandingSpark`)로 모듈화
-- 착지 직전 수직 낙하 속도(`FallSpeed`)에 비례한 조명 밝기(`Intensity`), 범위(`Radius`), 지속시간(`Duration`) 가변 조절 시스템 구현
-- 표면 법선(`ImpactNormal`) 기반 파티클 축 정렬 및 로봇 발바닥 위치 정확한 스폰 오프셋 보정
-
-### 작업 내용
-
-1. **`USparkComponent::TriggerLandingSpark` 정식 이벤트 작성**:
-   - `TriggerLandingSpark(Location, Normal, FallSpeed)` 함수 작성 및 C++ 모듈화
-   - 낙하 속도 크기(`SpeedMagnitude`) 및 제자리 점프 기준 문턱값(`450.0f`) 기반 ExcessSpeed 연산
-   - `GDD` 규정(0.8s ~ 1.2s) 내 가변 지속시간(`LightDuration`), 조명 밝기(`6000 ~ 30000`), 조명 범위(`500 ~ 2000`) 튜닝
-   - `FRotationMatrix::MakeFromZ(Normal).Rotator()`를 통한 표면 법선 기반 Niagara 파티클 방출 축 정렬
-2. **`ASparkCharacter::HandleLanded` 연동 및 발바닥 위치 보정**:
-   - `Super::Landed(Hit)` 실행 바로 직전 `GetCharacterMovement()->Velocity.Z`를 추출하여 착지 충격량 손실 없는 낙하 속도 가로채기 적용 (Tick 사용 없이 100% 이벤트 기반 구현으로 컨벤범 준수)
-   - `Hit.ImpactPoint` 부정확 시 캡슐 반높이(`GetScaledCapsuleHalfHeight()`) 차감을 통한 발바닥 접촉 위치(`LandingLocation`) 정밀 보정
-
-### 문제 및 해결 (Troubleshooting)
-
-- **문제 1: `Landed()` 시점 `GetVelocity().Z`가 지면 마찰로 인해 이미 감속되어 제자리 점프 수치로 고정됨**
-  - **원인**: 부모 `Super::Landed()` 내부에서 속도 벡터가 정지/감속 처리된 후 핸들러가 실행됨.
-  - **해결**: `Landed(Hit)` 오버라이드 함수 맨 첫 줄에서 `Super::Landed` 호출 직전 속도를 수동 가로채기 처리.
-- **문제 2: 파티클이 특정 한쪽 방향(-Y축)으로만 쏠려 방출됨**
-  - **원인**: `Normal.Rotation()` 사용 시 `UpVector(0,0,1)`이 Pitch +90도로 회전하여 Niagara 기본 +Z 방출 축과 90도 틀어짐.
-  - **해결**: `FRotationMatrix::MakeFromZ(Normal).Rotator()`를 사용해 표면 법선을 +Z 방출 축으로 정확하게 회전 변환.
-- **문제 3: 파티클이 바닥이 아닌 로봇 몸통/배 위치에서 튀어나옴**
-  - **원인**: `Hit.ImpactPoint`가 캡슐 중앙 피봇 근처로 전달되는 현상.
-  - **해결**: 캐릭터 위치에서 `CapsuleHalfHeight`를 뺀 정밀 발바닥 좌표로 보정 스폰.
-
-### 결과
-
-- 제자리 점프 시 **0.80초 / 6000 밝기 / 500 범위** 기본 연출 정확히 고정
-- 높은 구조물에서 낙하 시 높이에 비례하여 **최대 1.20초 / 30000 밝기 / 2000 범위**까지 대폭 시원하게 비춰지는 가변 시각 연출 검증 완료
-- 로봇 발바닥 지면 접촉면에서 표면 각도에 맞게 튀어나오는 고품질 Landing Spark 연출 완성
-
-### 관련 Commit 및 Issue
-
-- **Jira Issue**: [SPARK-17](https://dalyeou.atlassian.net/browse/SPARK-17) (완료 처리)
-
----
-
-## 2026-08-12 — Phase 1 Core Prototype: Wall Slide Spark 및 Wall Jump Spark 구현 (SPARK-18, SPARK-19)
-
-**Milestone:** Phase 1 — Core Prototype  
-**Category:** Spark / Character / VFX / Lighting  
-**Status:** Completed  
-**Branch:** feature/movement  
-**Issues:** SPARK-18, SPARK-19  
-**Engine:** Unreal Engine 5.5.4  
-
-### 목표
-
-- 수직 벽면을 타고 미끄러져 내리는 동안(`bIsWallSliding`) 미세한 마찰 Spark 불꽃과 라이트가 연속 발생하는 Wall Slide Spark 구현 (`SPARK-18`)
-- 벽을 차고 반사 솟구치는 순간(`HandleWallJump`) 강한 파티클 폭발 및 순간 밝은 조명이 터지는 Wall Jump Spark 구현 (`SPARK-19`)
-- 감지된 벽면 법선(`CurrentWallNormal`)에 부합하는 파티클 스폰 회전 정렬 적용
-
-### 작업 내용
-
-1. **`USparkComponent` Wall 연출 전용 이벤트 확장**:
-   - `TriggerWallSlideSpark(Location, WallNormal)`: 은은한 마찰 조명(`4000.0f` 밝기 / `400.0f` 반지름 / `0.4s` 유지) 및 `WallSlideSparkSystem` (또는 fallback `LandingSparkSystem`) 연동
-   - `TriggerWallJumpSpark(Location, WallNormal)`: 순간 강한 조명(`15000.0f` 밝기 / `12000.0f` 반지름 / `1.0s` 유지) 및 `WallJumpSparkSystem` 연동
-   - `FRotationMatrix::MakeFromZ(WallNormal).Rotator()`를 통한 벽면 법선 기반 방출 방향 정렬
-2. **`ASparkCharacter` 연동 및 방출 주기 제어**:
-   - `CheckWallSlide()` 내부에서 0.15초 타이머 간격(`LastWallSlideSparkTime`)으로 `TriggerWallSlideSpark()`를 부드럽게 연속 트리거
-   - `HandleWallJump()` 호출 시 벽면 트레이스 지점(`ImpactPoint`, `ImpactNormal`)을 포착하여 `TriggerWallJumpSpark()` 즉시 트리거
-
-### 결과
-
-- 벽면을 타고 내릴 때 `0.15초` 간격으로 벽 접촉면을 따라 마찰 스파크가 연속 발생하고 미세한 잔광이 미끄러지는 시각 효과 검증 완료
-- 벽을 팍 차고 튕겨 나가는 시점에 벽면 법선 반사 방향으로 강한 스파크 파티클과 시원한 조명 폭발 연출 확인 완료
-
-### 관련 Commit 및 Issue
-
-- **Jira Issue**: [SPARK-18](https://dalyeou.atlassian.net/browse/SPARK-18) (완료 처리)
-- **Jira Issue**: [SPARK-19](https://dalyeou.atlassian.net/browse/SPARK-19) (완료 처리)
-
----
-
-## 2026-08-12 — Phase 1 Core Prototype: Data-Driven Spark 연출 및 강도 분리 아키텍처 구현 (SPARK-23)
-
-**Milestone:** Phase 1 — Core Prototype  
-**Category:** Spark / Data / Architecture  
-**Status:** Completed  
-**Branch:** feature/movement  
-**Issues:** SPARK-23  
-**Engine:** Unreal Engine 5.5.4  
-
-### 목표
-
-- C++ 코드 내에 하드코딩되어 있던 이벤트별 조명 밝기, 반지름, 지속시간 및 파티클 에셋을 데이터 기반(Data-Driven) 구조로 완전 분리
-- `Docs/02_Architecture.md` 규칙을 준수하는 `USparkEffectDataAsset` (Primary Data Asset) 및 구조체 설계
-- C++ 재컴파일 없이 언리얼 에디터에서 이벤트별 연출 파라미터를 실시간 튜닝할 수 있는 확장성 확보 및 컴포넌트 레거시 속성 정리
-
-### 작업 내용
-
-1. **Spark 연출 데이터 구조 설계**:
-   - `Source/Spark/Data/SparkEffectData.h` 작성
-   - `FSparkEffectData` USTRUCT 선언: `LightIntensity`, `LightRadius`, `LightDuration`, `ParticleSystem` 데이터 통합 캡슐화
-   - `USparkEffectDataAsset` UPrimaryDataAsset 클래스 구현: `LandingData`, `WallSlideData`, `WallJumpData` 이벤트 세트 통합 관리
-2. **`USparkComponent` 데이터 기반 리팩토링 및 레거시 제거**:
-   - `SparkEffectDataAsset` 포인터 변수 추가 및 `SparkComponent.cpp` 이벤트 함수들(`TriggerLandingSpark`, `TriggerWallSlideSpark`, `TriggerWallJumpSpark`)이 데이터 에셋의 수치를 우선 참조하도록 개편
-   - 데이터 에셋 누락 시에 대비한 안전한 C++ 기본 fallback 로직 유지
-   - `SparkComponent` 내부의 중복 파티클 프로퍼티(`LandingSparkSystem`, `WallSlideSparkSystem`, `WallJumpSparkSystem`) 및 레거시 함수(`SpawnSparkParticle`) 완벽 제거하여 컴포넌트 디테일 패널 경량화
-3. **에셋 생성 및 컴포넌트 바인딩**:
-   - `Content/Spark/Data/` 위치에 `DA_SparkEffect_Default` (Data Asset) 에셋 생성 (Naming Convention `DA_` Prefix 준수)
-   - `BP_SparkCharacter`의 `SparkComponent`에 `DA_SparkEffect_Default` 바인딩 완료
-
-### 결과
-
-- Landing(`6000/500/0.8s`), Wall Slide(`4000/400/0.4s`), Wall Jump(`15000/1200/1.0s`) 등 각 이벤트별 Spark 연출 강도와 나이아가라 파티클이 에셋 하나로 완벽하게 데이터 분리됨
-- 에디터 상에서 `DA_SparkEffect_Default` 내 수치를 조절하는 것만으로 C++ 빌드 없이 실시간 밸런스 및 연출 수정 가능함을 검증 완료
-
-### 관련 Commit 및 Issue
-
-- **Jira Issue**: [SPARK-23](https://dalyeou.atlassian.net/browse/SPARK-23) (완료 처리)
-- Related Document: [02_Architecture.md](./02_Architecture.md), [07_Coding_Convention.md](./07_Coding_Convention.md)
+- **Jira Issue**: [SPARK-17](https://dalyeou.atlassian.net/browse/SPARK-17), [SPARK-18](https://dalyeou.atlassian.net/browse/SPARK-18), [SPARK-19](https://dalyeou.atlassian.net/browse/SPARK-19), [SPARK-20](https://dalyeou.atlassian.net/browse/SPARK-20), [SPARK-21](https://dalyeou.atlassian.net/browse/SPARK-21), [SPARK-23](https://dalyeou.atlassian.net/browse/SPARK-23) (모두 완료 처리)
+- Related Document: [05_Art_Direction.md](./05_Art_Direction.md), [02_Architecture.md](./02_Architecture.md), [07_Coding_Convention.md](./07_Coding_Convention.md)
 
 ---
 

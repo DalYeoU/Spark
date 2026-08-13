@@ -1122,6 +1122,7 @@ flowchart LR
 - `USparkComponent` 내 반복되던 조명/나이아가라 파티클 스폰 로직 및 타이머 잔광 제어를 보조 헬퍼 함수(`ExecuteSparkFX`, `StartLightFadeOut`)로 모듈화하여 단일 책임 원칙(SRP) 준수
 - 착지 전용 데이터 구조체(`FLandingSparkEffectData`)와 일반 이벤트 구조체(`FSparkEffectData`)를 계층적으로 분리하여 에디터 디테일 패널에서 불필요한 `Max` 수치 노출 방지
 - 착지 시 `Hit.ImpactPoint` 오차로 인해 파티클이 허리/골반 높이에서 뜨는 문제 해결 및 캡슐 하단(`CapsuleBottom.Z`) 기반 정밀 발바닥 좌표 강제 보정
+- Wall Jump / Wall Slide / Cable Interaction용 Niagara 파티클(`NS_Spark_WallJump`, `NS_Spark_WallSlide`, `NS_Spark_Cable`) 제작 및 경사면 착지 시 스폰 위치가 표면 아래로 파묻히는 문제 해결
 
 ### 작업 내용
 
@@ -1129,27 +1130,56 @@ flowchart LR
    - `ExecuteSparkFX(EffectData, Location, Normal)` 보조 함수 구현: 조명 스폰(`SpawnSparkLight`)과 표면 법선 축 정렬 Niagara 파티클 스폰을 통합 처리하여 `TriggerLandingSpark`, `TriggerWallSlideSpark`, `TriggerWallJumpSpark` 본문 중복 코드 100% 제거
    - `StartLightFadeOut(LightComponent, Intensity, Duration)` 보조 함수 분리: `SpawnSparkLight()` 내 중첩된 `if` 들여쓰기를 제거하고 잔광 세제곱 감쇄 람다 타이머 로직을 전담 캡슐화
 2. **에디터 UI 명확화를 위한 구조체 이중화 (`SparkEffectData.h`)**:
-   - `FSparkEffectData`: 단일 수치(`LightIntensity`, `LightRadius`, `LightDuration`, `ParticleSystem`) 전용 기본 구조체 (Wall Slide / Wall Jump 용)
+   - `FSparkEffectData`: 단일 수치(`LightIntensity`, `LightRadius`, `LightDuration`, `ParticleSystem`) 전용 기본 구조체 (Wall Slide / Wall Jump / Cable 용)
    - `FLandingSparkEffectData`: `FSparkEffectData`를 상속받아 낙하 속도 가변용 `MaxLightIntensity`, `MaxLightRadius`, `MaxLightDuration`을 확장 (Landing 용)
-   - `USparkEffectDataAsset`: `LandingData`에는 `FLandingSparkEffectData`를 적용하고, `WallSlideData`/`WallJumpData`에는 `FSparkEffectData`를 적용하여 에디터 디테일 패널상 불필요한 Max 필드 숨김 완료
+   - `USparkEffectDataAsset`: `LandingData`에는 `FLandingSparkEffectData`를 적용하고, `WallSlideData`/`WallJumpData`/`CableData`에는 `FSparkEffectData`를 적용하여 에디터 디테일 패널상 불필요한 Max 필드 숨김 완료
 3. **발바닥 지면 스폰 좌표 정밀 강제 보정 (`SparkCharacter.cpp`)**:
    - `ASparkCharacter::HandleLanded()` 내 `Hit.ImpactPoint`가 캡슐 중앙 피봇 근처로 수급되는 현상 포착
-   - `CapsuleBottom = GetActorLocation() - FVector(0, 0, CapsuleHalfHeight)`를 기점으로 `LandingLocation.Z`를 `FMath::Min(Hit.ImpactPoint.Z, CapsuleBottom.Z)`로 보정하여 발바닥 바닥면에 조명과 Niagara 파티클이 오차 없이 정확히 밀착 스폰되도록 정밀 수정
+   - `CapsuleBottom = GetActorLocation() - FVector(0, 0, CapsuleHalfHeight)`를 기점으로 `LandingLocation.Z`를 `FMath::Min(Hit.ImpactPoint.Z, CapsuleBottom.Z)`로 보정 (이후 경사면 테스트에서 부작용 발견, 문제 3에서 재수정)
+4. **Wall Jump / Wall Slide / Cable Spark Niagara 파티클 제작**:
+   - `NS_Spark_Landing`을 기반으로 `NS_Spark_WallJump`(강한 순간 폭발), `NS_Spark_WallSlide`(약한 연속 마찰, C++ 쪽에서 0.15초 주기로 반복 트리거), `NS_Spark_Cable`(가장 강한 임팩트) 복제 제작
+   - Wall Slide는 `ASparkCharacter::CheckWallSlide()`에서 벽 트레이스가 캡슐 중심 높이에서 나가는 것을 보정하기 위해 Spark 스폰 위치의 Z만 캡슐 반높이 기준으로 낮춰서 전달하도록 수정
+   - `SparkEffectData.h`에 `FSparkEffectData CableData` 필드 추가 및 `DA_SparkEffect_Default`에 연결
+5. **Landing Spark 스폰 위치 경사면 대응 재수정 (`SparkCharacter.cpp`)**:
+   - 문제 3에서 발견된 대로, `LandingLocation.Z`를 `CapsuleBottom.Z`로 강제로 누르는 보정을 제거하고 `Hit.ImpactPoint`를 그대로 신뢰하도록 롤백
 
 ### 문제 및 해결 (Troubleshooting)
 
 - **문제 1: C++ 구조체 계층 변경 후 디테일 패널에서 Data Asset이 `None`으로 표시되고 목록에서 사라짐**
   - **원인**: C++ 구조체 변경 시 기존 바이너리 직렬화 데이터와 클래스 캐시가 깨져 발생.
   - **해결**: 에디터 재시작 후 깨진 에셋 삭제 ➔ `USparkEffectDataAsset` 기반으로 `DA_SparkEffect_Default` 재생성 ➔ `BP_SparkCharacter` 재바인딩으로 정상 복구.
+  - **후속 재현**: `CableData` 필드 추가 후에도 동일하게 새 필드가 안 보이는 현상 재발. 이번엔 에셋 손상이 아니라 `Spark|Events` 카테고리가 접혀 있어서 못 보고 있던 것으로 확인(가짜 재현).
 - **문제 2: 파티클이 발바닥이 아닌 캐릭터 허리/배 위쪽에서 스폰됨**
-  - **원인**: `Hit.ImpactPoint`가 0이 아니어 기존 예외 처리를 우회했으나, 원시 `ImpactPoint` 자체의 높이가 캡슐 중앙 높이 근처로 유효 반환됨.
-  - **해결**: `LandingLocation.Z`를 캡슐 반높이 차감 좌표(`CapsuleBottom.Z`)로 강제 하강 보정.
+  - **원인**: `Hit.ImpactPoint`가 0이 아니어 기존 예외 처리를 우회했으나, 원시 `ImpactPoint` 자체의 높이가 캡슐 중앙 높이 근처로 유효 반환된 것으로 추정.
+  - **1차 해결(실패)**: `LandingLocation.Z`를 캡슐 반높이 차감 좌표(`CapsuleBottom.Z`)로 강제 하강 보정.
+  - **재진단**: 실제로는 위치 오차가 아니라 Niagara `Add Velocity`의 Z 속도(약 300~500)로 인해 파티클이 스폰 직후 위로 튀어 오르며 수명 중 이동한 것을 스크린샷상 "무릎 높이"로 오인한 것. 좌표 자체는 정상이었음.
+  - **부작용**: 위 1차 해결(Z 강제 하강)이 평지에서는 우연히 문제가 없었지만, 경사면 착지 시 실제 접촉점보다 낮은 좌표로 스폰 위치를 강제로 파묻어 스파크가 바닥 아래에서 나타나는 새 버그를 유발. 문제 3에서 재수정.
+- **문제 3: 경사면(기울어진 Plane)에 착지 시 조명/파티클이 바닥 아래에 스폰되고, 일부는 스폰 직후 막혀서 나타나지 않음**
+  - **원인 A(위치)**: `HandleLanded()`의 `LandingLocation.Z = Min(Hit.ImpactPoint.Z, CapsuleBottom.Z)` 보정이 수직 캡슐 기준으로만 계산되어, 경사면 접촉점(Z가 `CapsuleBottom.Z`보다 높을 수 있음)을 표면보다 아래로 눌러버림.
+    - **해결**: Z 강제 보정을 제거하고 `Hit.ImpactPoint`를 그대로 사용(경사면 접촉점은 언리얼 충돌 결과가 이미 정확하게 반환).
+  - **원인 B(스폰 직후 재충돌)**: Niagara `Collision` 모듈의 `CPU Collision Trace Channel`이 `WorldDynamic`으로 설정되어 있어, 캐릭터(Pawn)도 이 채널에 걸려 발밑/벽 근처에서 스폰된 스파크가 캐릭터 자신의 캡슐에 즉시 충돌해 막힘.
+    - **1차 해결**: `WorldDynamic` → `WorldStatic`으로 변경해 캐릭터와의 충돌은 회피.
+    - **잔존 문제**: Wall Slide와 경사면 착지에서는 표면 법선과 중력(-Z) 방향이 어긋나 스폰 직후 중력에 의해 다시 표면(이번엔 레벨의 정적 콜리전) 쪽으로 끌려가 재충돌하는 현상 지속.
+    - **최종 해결**: 수명 0.2~0.5초의 순수 시각 효과이므로 물리적 반사가 꼭 필요하지 않다고 판단, `Landing`/`WallSlide`/`WallJump`/`Cable` 파티클 전부 Collision 모듈을 비활성화.
+  - **원인 C(스폰 지점이 한 점이 아니라 넓게 흩어짐)**: Particle Spawn의 `Shape Location`(Cone) 모듈 `Cone Length`가 50.0으로 설정되어, 파티클이 원점이 아니라 길이 50 범위의 콘 부피 전체에서 스폰됨.
+    - **해결**: `Cone Length`를 0.0으로 설정해 위치는 한 점으로 고정하고 `Cone Angle`만으로 방향을 분산시키도록 수정.
 
 ### 결과
 
 - `USparkComponent` 코드 길이가 180줄에서 150줄 이하로 줄어들고 중복 로직이 깔끔하게 정돈됨
-- 에디터 데이터 에셋 디테일 패널에서 Wall Slide/Wall Jump 항목의 불필요한 Max 수치가 깔끔하게 가려져 기획 편의성 향상
-- 착지 시 조명과 스파크 파티클이 위치 오차 없이 발바닥 바닥 지면 표면에서 정밀하게 튀어나오는 연출 확인 완료
+- 에디터 데이터 에셋 디테일 패널에서 Wall Slide/Wall Jump/Cable 항목의 불필요한 Max 수치가 깔끔하게 가려져 기획 편의성 향상
+- Landing / Wall Slide / Wall Jump / Cable 4종 파티클이 모두 한 점에서 정확히 퍼져나가며, 평지·경사면·벽면에서 스폰 직후 막히지 않고 정상 연출됨을 확인
+- `DA_SparkEffect_Default`에 `CableData` 추가로 4개 이벤트 전체의 데이터 구조 완성 (`ParticleSystem`/`LightIntensity`/`LightRadius`/`LightDuration` 연결 완료, 실제 Cable Interaction 트리거 로직은 미구현)
+
+### 알려진 문제
+
+- Cable Interaction의 실제 트리거(케이블 접촉 감지, `TriggerCableSpark()` 함수) 미구현 — 파티클/데이터만 선행 준비된 상태
+- Physical Material 기반 Surface Detection(ADR-004) 미구현 — 현재 모든 Surface가 동일한 Spark 파라미터를 사용
+
+### 다음 작업
+
+- Cable Interaction 감지 로직 및 `USparkComponent::TriggerCableSpark()` 구현
+- Physical Material 기반 Surface Detection(ADR-004) 구현 후 Surface Type별 Spark 분기 연동
 
 ### 관련 Commit 및 Issue
 

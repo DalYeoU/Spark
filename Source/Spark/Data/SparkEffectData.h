@@ -53,8 +53,6 @@ struct FLandingSparkEffectData : public FSparkEffectData
 };
 
 /**
- * USparkEffectDataAsset
- *
  * 이벤트별 Spark 연출 파라미터를 통합 관리하는 데이터 에셋입니다.
  */
 UCLASS(BlueprintType)
@@ -74,4 +72,8 @@ public:
     // 벽 점프(Wall Jump) Spark 데이터
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Events")
     FSparkEffectData WallJumpData;
+
+    // 케이블(Cable Interaction) Spark 데이터
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Events")
+    FSparkEffectData CableData;
 };

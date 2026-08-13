@@ -91,7 +91,7 @@ void USparkComponent::ExecuteSparkFX(const FSparkEffectData& EffectData, const F
 
 void USparkComponent::TriggerLandingSpark(const FVector& Location, const FVector& Normal, float Fallspeed)
 {
-    // 바닥 메쉬 내부에 파묻히지 않게 표면에 살짝 띄워줌
+    // 바닥 메쉬 내부에 파묻히거나 콜리전 스킨 여유값에 걸쳐 파티클이 간헐적으로 막히지 않도록 표면에서 충분히 띄워줌
     const FVector SpawnLocation = Location + (Normal * 1.0f);
     
     // 기본 fallback 값

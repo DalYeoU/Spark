@@ -122,11 +122,14 @@ void ASparkCharacter::HandleLanded(const FHitResult& Hit, float FallSpeed)
         CapsuleHalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight();
     }
     
-    // ImpactPoint가 없거나 이상하면 캐릭터 위치에서 발밑 좌료를 발바닥 위치로 사용
-    FVector LandingLocation = Hit.ImpactPoint;
-    if (LandingLocation.IsNearlyZero() || FVector::DistSquared(LandingLocation, GetActorLocation()) > 40000.0f)
+    const FVector CapsuleBottom = GetActorLocation() - FVector(0.0f, 0.0f, CapsuleHalfHeight);
+    
+    // ImpactPoint가 없거나 이상하면(원점 근처) 캐릭터 위치에서 발밑 좌표를 발바닥 위치로 사용
+    // 경사면에서는 ImpactPoint가 CapsuleBottom보다 높을 수 있으므로 Z를 강제로 누르지 않고 그대로 신뢰
+    FVector LandingLocation = CapsuleBottom;
+    if (!Hit.ImpactPoint.IsNearlyZero())
     {
-        LandingLocation = GetActorLocation() - FVector(0.0f, 0.0f, CapsuleHalfHeight);
+        LandingLocation = Hit.ImpactPoint;
     }
     
     // Landing Spark 이벤트 트리거 (위치, 표면 법선, 낙하 속도 전달)
@@ -164,7 +167,16 @@ void ASparkCharacter::CheckWallSlide()
             LastWallSlideSparkTime = CurrentTime;
             if (SparkComponent)
             {
-                SparkComponent->TriggerWallSlideSpark(HitResult.ImpactPoint, HitResult.ImpactNormal);   
+                // 벽 트레이스는 캡슐 중심 높이에서 나가므로, Spark는 발밑 높이로 낮춰서 스폰
+                float CapsuleHalfHeight = 88.0f;
+                if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
+                {
+                    CapsuleHalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight();
+                }
+                FVector SparkLocation = HitResult.ImpactPoint;
+                SparkLocation.Z = GetActorLocation().Z - CapsuleHalfHeight;
+
+                SparkComponent->TriggerWallSlideSpark(SparkLocation, HitResult.ImpactNormal);
             }
         }
     }

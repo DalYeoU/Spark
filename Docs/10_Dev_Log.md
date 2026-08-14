@@ -1089,6 +1089,67 @@ flowchart LR
 
 ---
 
+## 2026-08-14 — Phase 1 Core Prototype: Physical Material 설정 및 Surface Type 판정 시스템 구현 (SPARK-24, SPARK-25, SPARK-29)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Surface / Physics / Data Asset / Utility  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-24, SPARK-25, SPARK-29  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 프로젝트 세팅 및 Physical Material 에셋(`PM_Default`, `PM_Metal`, `PM_Rubber`, `PM_Cable`)을 통한 물리 표면(Surface Type) 체계 구축 (SPARK-24)
+- 게임플레이 전용 표면 열거형(`ESparkSurfaceType`) 및 통합 데이터 관리용 Data Asset(`USparkSurfaceDataAsset`) 구조 설계 (SPARK-29)
+- `FHitResult` 및 `EPhysicalSurface` 기반의 독립적인 표면 판정 유틸리티 라이브러리(`USparkSurfaceLibrary`) 구현 (SPARK-25)
+- 캐릭터 발밑 LineTrace 테스트를 통해 표면별 판정 정상 동작 실기 검증
+
+### 작업 내용
+
+1. **프로젝트 물리 표면(Physical Surface) 설정 (`Config/DefaultEngine.ini`)**:
+   - `PhysicalSurfaces` 항목에 `SurfaceType1`="Metal", `SurfaceType2`="Rubber", `SurfaceType3`="Cable" 등록
+   - `Content/Spark/Data/Surface/`에 `PM_Default`, `PM_Metal`, `PM_Rubber`, `PM_Cable` 에셋 생성 및 Surface Type 할당
+2. **Surface 데이터 에셋 및 열거형 정의 (`SparkSurfaceData.h`)**:
+   - `ESparkSurfaceType` (`Default`, `Metal`, `Rubber`, `Cable`, `None`) 열거형 정의
+   - `FSparkSurfaceData`: 스파크 발생 허용 여부(`bCanGenerateSpark`) 및 연출 파라미터(`FSparkEffectData EffectData`)를 묶는 전용 구조체 정의
+   - `USparkSurfaceDataAsset`: 표면별 데이터(`DefaultData`, `MetalData`, `RubberData`, `CableData`)를 단일 에셋에서 통합 관리하고 `GetSurfaceData()` 조회 헬퍼를 제공하는 Data Asset 구현
+3. **공용 표면 판정 유틸리티 구현 (`SparkSurfaceLibrary.h / .cpp`)**:
+   - `UBlueprintFunctionLibrary`를 상속받은 `USparkSurfaceLibrary` 작성
+   - `GetSurfaceType(const FHitResult& HitResult)`: `UGameplayStatics::GetSurfaceType()`을 사용하여 충돌 정보로부터 `EPhysicalSurface`를 추출하고 `ESparkSurfaceType`으로 변환 반환
+   - `ConvertToSparkSurfaceType(EPhysicalSurface SurfaceType)`: 엔진 물리 표면 슬롯을 게임 전용 Enum으로 매핑
+4. **빌드 모듈 의존성 보강 (`Spark.Build.cs`)**:
+   - `EPhysicalSurface` 리플렉션 코드 링크를 위해 `PublicDependencyModuleNames`에 `"PhysicsCore"` 모듈 추가
+5. **에디터 실기 검증**:
+   - `Content/Spark/Data/Surface/`에 `DA_SurfaceData` 에셋 생성 및 표면별 파라미터(Rubber의 `bCanGenerateSpark = false`, Cable의 `NS_Spark_Cable` 등) 설정
+   - `BP_SparkCharacter`에서 LineTrace (Trace Complex 활성화) 및 `Get Surface Type` 노드를 연결하여 큐브/바닥의 `Metal`, `Rubber`, `Cable`, `Default`가 정확히 판정 및 화면에 출력됨을 확인
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: `SparkSurfaceLibrary` 컴파일 시 `EPhysicalSurface` 관련 LNK2019 링크 에러 발생**
+  - **원인**: `UFUNCTION` 매개변수로 `EPhysicalSurface`를 노출하면서 리플렉션 코드(`Z_Construct_UEnum_PhysicsCore_EPhysicalSurface`)가 생성되었으나, `PhysicsCore` 모듈이 `Spark.Build.cs` 의존성에 누락됨.
+  - **해결**: `Spark.Build.cs`의 `PublicDependencyModuleNames`에 `"PhysicsCore"`를 추가하여 정상 링크 완료.
+- **문제 2: Data Asset의 표면별 파티클 슬롯과 행동(이벤트)별 파티클 간 충돌 가능성 분석**
+  - **원인/의문**: `DA_SurfaceData`의 `MetalData`에 `NS_Spark_Landing`을 고정 지정하면, 벽 슬라이드(`WallSlide`) 시에도 착지 파티클이 재생되는 문제 발생 우려.
+  - **해결/설계 확정**: 기본 표면(`Default`, `Metal`)은 `DA_SurfaceData`의 `ParticleSystem`을 `None`(비워둠)으로 유지하고, 시스템이 현재 동작(Landing/WallSlide/WallJump)에 맞는 파티클을 출력하도록 설계. Cable처럼 특수한 표면만 전용 파티클(`NS_Spark_Cable`)로 오버라이드하도록 가이드 확립.
+
+### 결과
+
+- 물리 머티리얼과 연동되는 독립적인 Surface Detection 시스템 완성
+- 에디터 상에서 바닥 재질별로 `Metal`, `Rubber`, `Cable`, `Default`가 100% 신뢰성 있게 판정됨을 실기 확인
+- 다음 작업(`SparkComponent`와 `DA_SurfaceData`를 연동하여 표면별 스파크 분기 처리)을 위한 완벽한 기반 마련
+
+### 알려진 문제 및 다음 작업
+
+- `SparkComponent` 내부의 각 이벤트 트리거(`TriggerLandingSpark` 등)에 Surface Type/HitResult 전달 및 `bCanGenerateSpark == false` 시 조기 종료(Rubber 무반응) 로직 미연결
+- Cable 표면 접촉 시 강력한 스파크 연출 분기 및 Cable Interaction 트리거 로직 구현 예정 (SPARK-26 - SPARK-28)
+
+### 관련 Commit 및 Issue
+
+- **Jira Issue**: [SPARK-24](https://dalyeou.atlassian.net/browse/SPARK-24), [SPARK-25](https://dalyeou.atlassian.net/browse/SPARK-25), [SPARK-29](https://dalyeou.atlassian.net/browse/SPARK-29)
+
+---
+
 # Daily Log Template
 
 아래 Template을 복사하여 일일 개발 기록에 사용한다.

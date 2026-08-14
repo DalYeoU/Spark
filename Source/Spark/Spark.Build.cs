@@ -13,7 +13,7 @@ public class Spark : ModuleRules
         PublicIncludePaths.Add(ModuleDirectory);
 
         PublicDependencyModuleNames.AddRange(new string[]
-            { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Niagara" });
+            { "Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "Niagara", "PhysicsCore" });
 
         PrivateDependencyModuleNames.AddRange(new string[] { });
 

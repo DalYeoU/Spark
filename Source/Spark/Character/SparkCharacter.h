@@ -135,4 +135,9 @@ private:
     // Wall Slide Spark 방출 타이밍 조절용 변수
     float LastWallSlideSparkTime = 0.0f;
     
+    // 착지 충돌 결과에서 실제 밟고있는 머티리얼 정보를 반환
+    FHitResult ResolveLandingHit(const FHitResult& InHit) const;
+    
+    // 벽 슬라이드 마찰 스파크 주기적 트리거 보조 함수
+    
 };

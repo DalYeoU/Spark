@@ -115,28 +115,61 @@ void ASparkCharacter::HandleLanded(const FHitResult& Hit, float FallSpeed)
     LastWallJumpTime = -1.0f;
     bHasWallJumpedSinceGrounded = false;
     
-    // 캡슐 반높이를 구해 바닥 좌표 계산
-    float CapsuleHalfHeight = 88.0f;
-    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
-    {
-        CapsuleHalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight();
-    }
-    
-    const FVector CapsuleBottom = GetActorLocation() - FVector(0.0f, 0.0f, CapsuleHalfHeight);
-    
-    // ImpactPoint가 없거나 이상하면(원점 근처) 캐릭터 위치에서 발밑 좌표를 발바닥 위치로 사용
-    // 경사면에서는 ImpactPoint가 CapsuleBottom보다 높을 수 있으므로 Z를 강제로 누르지 않고 그대로 신뢰
-    FVector LandingLocation = CapsuleBottom;
-    if (!Hit.ImpactPoint.IsNearlyZero())
-    {
-        LandingLocation = Hit.ImpactPoint;
-    }
-    
-    // Landing Spark 이벤트 트리거 (위치, 표면 법선, 낙하 속도 전달)
+    // 바닥 정보 획득 및 Landing Spark 트리거
     if (SparkComponent)
     {
-        SparkComponent->TriggerLandingSpark(LandingLocation, Hit.ImpactNormal, FallSpeed);   
+        const FHitResult LandingHit = ResolveLandingHit(Hit);
+        SparkComponent->TriggerLandingSpark(LandingHit, FallSpeed);
     }
+}
+
+FHitResult ASparkCharacter::ResolveLandingHit(const FHitResult& InHit) const
+{
+    FHitResult LandingHit = InHit;
+    float Radius = 34.0f;
+    float HalfHeight = 88.0f;
+    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
+    {
+        Radius = CapsuleComp->GetScaledCapsuleRadius();
+        HalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight();
+    }
+    
+    // 무브먼트 컴포넌트가 찾은 실제 바닥 정보 사용
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        if (MoveComp->CurrentFloor.IsWalkableFloor() && MoveComp->CurrentFloor.HitResult.IsValidBlockingHit())
+        {
+            LandingHit = MoveComp->CurrentFloor.HitResult;
+        }
+    }
+    
+    // 머티리얼 정보가 없으면 캡슐 스윕으로 보정함
+    if (!LandingHit.PhysMaterial.IsValid())
+    {
+        FCollisionQueryParams QueryParams;
+        QueryParams.AddIgnoredActor(this);
+        QueryParams.bTraceComplex = true;
+        QueryParams.bReturnPhysicalMaterial = true;
+
+        const FVector Start = GetActorLocation();
+        const FVector End = Start - FVector(0.0f, 0.0f, 20.0f);
+        const FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(Radius, HalfHeight);
+            
+        FHitResult SweepHit;
+        if (GetWorld()->SweepSingleByChannel(SweepHit, Start, End, FQuat::Identity, ECC_Visibility, CapsuleShape, QueryParams))
+        {
+            LandingHit.PhysMaterial = SweepHit.PhysMaterial;
+            LandingHit.ImpactPoint = SweepHit.ImpactPoint;
+            LandingHit.ImpactNormal = SweepHit.ImpactNormal;
+        }
+    }
+    
+    // 만약 여전히 ImpactPoint가 비어있다면 발바닥 위치로 최종 보정
+    if (LandingHit.ImpactPoint.IsNearlyZero())
+    {
+        LandingHit.ImpactPoint = GetActorLocation() - FVector(0.0f, 0.0f, HalfHeight);
+    }
+    return LandingHit;
 }
 
 // 공중에서 정면 벽을 감지해 Wall Slide 상태를 갱신하고, 슬라이드 중이면 낙하 속도를 늦춘다.
@@ -149,43 +182,50 @@ void ASparkCharacter::CheckWallSlide()
         CurrentWallNormal = FVector::ZeroVector;
         return;
     }
-
+    
+    // 정면 벽 감지
     FHitResult HitResult;
     if (TraceForWall(HitResult))
     {
-        // 벽을 감지하면 슬라이드 상태로 전환하고, 다음 벽점프 계산에 쓸 노멀을 저장
         bIsWallSliding = true;
         CurrentWallNormal = HitResult.ImpactNormal;
-
-        // 슬라이드 중에는 낙하 속도를 늦춰서 벽에 붙어 미끄러지는 느낌을 준다
+        
+        // 낙하 속도 감속
         ClampFallSpeedForWallSlide();
         
-        // 0.15초마다 마찰 Spark 이벤트 연속 트리거
-        const float CurrentTime = GetWorld()->GetTimeSeconds();
-        if (CurrentTime - LastWallSlideSparkTime > 0.15f)
-        {
-            LastWallSlideSparkTime = CurrentTime;
-            if (SparkComponent)
-            {
-                // 벽 트레이스는 캡슐 중심 높이에서 나가므로, Spark는 발밑 높이로 낮춰서 스폰
-                float CapsuleHalfHeight = 88.0f;
-                if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
-                {
-                    CapsuleHalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight();
-                }
-                FVector SparkLocation = HitResult.ImpactPoint;
-                SparkLocation.Z = GetActorLocation().Z - CapsuleHalfHeight;
-
-                SparkComponent->TriggerWallSlideSpark(SparkLocation, HitResult.ImpactNormal);
-            }
-        }
+        // 마찰 스파크 연출 갱신
+        UpdateWallSlideSpark();
     }
     else
     {
-        // 벽이 없으면 일반 낙하 상태이므로 슬라이드 상태와 저장된 노멀을 모두 초기화
         bIsWallSliding = false;
         CurrentWallNormal = FVector::ZeroVector;
     }
+}
+
+void ASparkCharacter::UpdateWallSlideSpark(const FHitResult& HitResult)
+{
+    if (!SparkComponent) return;
+    
+    // 0.15초 주기 검사
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+    if (CurrentTime - LastWallSlideSparkTime <= 0.15f)
+    {
+        return;
+    }
+    LastWallSlideSparkTime = CurrentTime;
+    
+    // 발 밑 높이로 Spark 위치 보정
+    float CapsuleHalfHeight = 88.0f;
+    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
+    {
+        CapsuleHalfHeight = CapsuleComp->GetScaledCapsuleHalfHeight();
+    }
+    
+    FHitResult SlideHit = HitResult;
+    SlideHit.ImpactPoint.Z = GetActorLocation().Z - CapsuleHalfHeight;
+    
+    SparkComponent->TriggerWallSlideSpark(SlideHit);
 }
 
 bool ASparkCharacter::CanEnterWallSlide() const
@@ -213,6 +253,8 @@ bool ASparkCharacter::TraceForWall(FHitResult& OutHitResult) const
 
     FCollisionQueryParams QueryParams;
     QueryParams.AddIgnoredActor(this);
+    QueryParams.bReturnPhysicalMaterial = true;
+    QueryParams.bTraceComplex = true;
 
     // Wall Slide 전용 Trace Channel 사용 (Project Settings에서 이름을 "Wall"로 지정해둬야 함)
     const bool bHit = GetWorld()->LineTraceSingleByChannel(OutHitResult, Start, End, ECC_GameTraceChannel1, QueryParams);
@@ -274,12 +316,16 @@ void ASparkCharacter::HandleWallJump()
         FHitResult HitResult;
         if (TraceForWall(HitResult))
         {
-            SparkComponent->TriggerWallJumpSpark(HitResult.ImpactPoint, HitResult.ImpactNormal);
+            SparkComponent->TriggerWallJumpSpark(HitResult);
         }
         else
         {
-            // 혹시 트레이스 직후 미세하게 떨어졌다면 현재 위치와 노멀로 대체
-            SparkComponent->TriggerWallJumpSpark(GetActorLocation(), CurrentWallNormal);
+            // 혹시 트레이스 직후 미세하게 떨어졌다면 현재 위치와 노멀로 대체한 HitResult 구성
+            FHitResult FallbackHit;
+            FallbackHit.ImpactPoint = GetActorLocation();
+            FallbackHit.ImpactNormal = CurrentWallNormal;
+            FallbackHit.Location = GetActorLocation();
+            SparkComponent->TriggerWallJumpSpark(FallbackHit);
         }
     }
 }

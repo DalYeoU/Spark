@@ -6,6 +6,7 @@
 
 class UNiagaraSystem;
 class USparkEffectDataAsset;
+class USparkSurfaceDataAsset;
 class UPointLightComponent;
 struct FSparkEffectData;
 /**
@@ -33,28 +34,25 @@ public:
     
     /**
      * 캐릭터 착지 시 Landing Spark 연출 트리거
-     * @param Location 착지 발생 월드 위치
-     * @param Normal 착지 지점의 표면 법선 벡터 (불꽃이 튀는 반사 방향 정렬용)
+     * @param HitResult 착지 충돌 결과
      * @param Fallspeed 착지 직전 캐릭터의 낙하 속도 (연출 강도 조절용)
      */
     UFUNCTION(BlueprintCallable, Category = "Spark|Events")
-    void TriggerLandingSpark(const FVector& Location, const FVector& Normal, float Fallspeed = 0.0f);
+    void TriggerLandingSpark(const FHitResult& HitResult, float Fallspeed = 0.0f);
     
     /*
      * 벽 슬라이드 마찰 Spark 연출 트리거
-     * @param Location 벽면 접촉 위치
-     * @param WallNormal 감지된 벽면 법선
+     * @param HitResult 벽면 충돌 결과
      */
     UFUNCTION(BlueprintCallable, Category = "Spark|Events")
-    void TriggerWallSlideSpark(const FVector& Location, const FVector& WallNormal);
+    void TriggerWallSlideSpark(const FHitResult& HitResult);
     
     /*
      * 벽 점프 순간 폭발 Spark 연출 트리거
-     * @param Location 벽 점프 발생 위치
-     * @param WallNormal 감지된 벽면 법선
+     * @param HitResult 벽면 충돌 결과
      */
     UFUNCTION(BlueprintCallable, Category = "Spark|Events")
-    void TriggerWallJumpSpark(const FVector& Location, const FVector& WallNormal);
+    void TriggerWallJumpSpark(const FHitResult& HitResult);
     
 protected:
 	virtual void BeginPlay() override;
@@ -68,8 +66,15 @@ private:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Data", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<USparkEffectDataAsset> SparkEffectDataAsset;
     
+    // 표면별(Metal, Rubber, Cable 등) 특성 및 오버라이드를 관리하는 데이터 에셋
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Data", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<USparkSurfaceDataAsset> SparkSurfaceDataAsset;
+    
+    // 표면 데이터를 확인하여 스파크 생성 가능 여부 확인 및 오버라이드 적용
+    bool ApplySurfaceOverride(const FHitResult& HitResult, FSparkEffectData& InOutEffectData) const;
+    
     // 공통 Spark FX(조명 + 파티클) 일괄 실행 보조 함수
-    void ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal);
+    void ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal, const FHitResult& HitResult);
     
     // Point Light 잔광 페이드 아웃 타이머 시작 보조 함수
     void StartLightFadeOut(UPointLightComponent* LightComponent, float Intensity, float Duration);

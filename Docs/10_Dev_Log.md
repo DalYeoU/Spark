@@ -1150,6 +1150,65 @@ flowchart LR
 
 ---
 
+## 2026-08-15 — Phase 1 Core Prototype: 표면별 Spark 반응 및 무반응/오버라이드 시스템 연동 (SPARK-26, SPARK-27, SPARK-28)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Spark / Surface / Gameplay / Component  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Issues:** SPARK-26, SPARK-27, SPARK-28  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- `SparkComponent`의 스파크 트리거 함수들에 충돌 정보(`FHitResult`)를 전달하여 표면 기반 분기 처리 체계 구축
+- Rubber 표면 접촉 시 스파크 생성 차단(`bCanGenerateSpark == false`) 처리 (SPARK-27)
+- Metal 및 Default 표면에서 기본 착지/벽슬라이드/벽점프 스파크 연출 정상 동작 (SPARK-26)
+- Cable 표면 접촉 시 표면 데이터 기반의 전용 파티클 및 조명 오버라이드/강화 로직 구현 (SPARK-28)
+
+### 작업 내용
+
+1. **`SparkComponent` 표면 데이터 에셋 연동 및 트리거 인터페이스 개선 (`SparkComponent.h / .cpp`)**:
+   - `USparkSurfaceDataAsset` 참조 프로퍼티(`SparkSurfaceDataAsset`) 추가
+   - `TriggerLandingSpark`, `TriggerWallSlideSpark`, `TriggerWallJumpSpark`의 매개변수를 `const FHitResult& HitResult`로 확장하여 충돌 위치, 법선, 물리 머티리얼 정보를 컴포넌트 내부에서 통합 처리
+   - 표면 검사 및 오버라이드 전담 헬퍼 `ApplySurfaceOverride()` 구현:
+     - `USparkSurfaceLibrary::GetSurfaceType(HitResult)`로 표면 판정
+     - Rubber 표면처럼 `bCanGenerateSpark == false`인 경우 `false`를 반환하여 스파크 생성을 즉시 차단
+     - Cable 등 표면 데이터에 `ParticleSystem` 또는 조명 파라미터가 설정된 경우 행동 기본 FX를 표면 전용 FX로 오버라이드
+   - `ExecuteSparkFX()` 내부로 `ApplySurfaceOverride()` 호출을 통합하여 모든 트리거 함수의 중복 if문을 제거하고 단일 실행 진입점으로 리팩토링
+2. **`SparkCharacter` 호출부 연동 및 단일 책임 원칙(SRP) 기반 리팩토링 (`SparkCharacter.h / .cpp`)**:
+   - `OnLanded` / `HandleLanded`: `ResolveLandingHit()` 헬퍼 함수로 분리하여 바닥 보정 및 캡슐 스윕 로직을 캡슐화하고 메인 흐름을 간결화
+   - `CheckWallSlide`: `UpdateWallSlideSpark()` 헬퍼 함수로 분리하여 물리 감속/상태 전이 흐름과 0.15초 주기 스파크 연출 로직을 분리
+   - `HandleWallJump`: 벽 감지 결과(`HitResult`)를 `TriggerWallJumpSpark`로 전달
+3. **컴파일 및 빌드 검증**:
+   - `UnrealBuildTool`을 통해 `SparkEditor Win64 Development` 빌드 완료 및 링킹 검증
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: 행동별 데이터 에셋과 표면별 데이터 에셋 간의 파티클/조명 우선순위 설계**
+  - **원인**: 기본 표면(Metal, Default)과 특수 표면(Cable)이 각각 행동별 연출과 어떻게 조합되어야 하는지 명확한 합성 규칙 필요.
+  - **해결**: "행동 베이스 + 표면 필터/오버라이드" 규칙을 적용. 기본 표면은 행동별 파티클(착지/슬라이드/벽점프)을 그대로 사용하고, Rubber는 조기 차단 필터, Cable은 전용 파티클 및 조명 수치로 오버라이드하도록 설계하여 유연성과 확장성 확보.
+- **문제 2: 트레이스 시 물리 머티리얼이 `None`으로 반환되는 현상 및 모서리 착지 판정 오차**
+  - **원인**: `TraceForWall`의 `FCollisionQueryParams`에 `bReturnPhysicalMaterial = true` 및 `bTraceComplex = true`가 누락되었고, 착지 시 캐릭터 중심 수직 선(Line) 트레이스는 캡슐 가장자리로 큐브 모서리를 밟고 있을 때 큐브 밖 바닥을 찍는 문제 발생.
+  - **해결**: 트레이스 쿼리 플래그를 활성화하고, `HandleLanded`에서 `CurrentFloor` 정보 반영 및 캡슐 볼륨 그대로 아래로 스윕하는 `SweepSingleByChannel(CapsuleShape)` 방식을 적용하여 모서리에 걸쳐 서 있는 경우에도 100% 신뢰성 있게 물리 머티리얼을 판정하도록 구현.
+- **문제 3: Cable 표면에서 전용 파티클이 아닌 기본 벽슬라이드 파티클이 출력되는 현상**
+  - **원인**: `ExecuteSparkFX` 내부에서 오버라이드된 `FinalFXData`가 아닌 원본 `EffectData`를 파티클 스폰 및 조명 파라미터로 참조함.
+  - **해결**: `FinalFXData`의 파라미터를 사용하도록 수정하여 `NS_Spark_Cable` 전용 파티클이 정상 스폰되도록 수정.
+
+### 결과
+
+- Metal, Rubber, Cable, Default 표면에 맞춘 완전한 스파크 연출 분기 처리 체계 구축 완료
+- 모서리 착지 및 벽 접촉 상황에서도 물리 머티리얼이 정확하게 판정됨을 실기 확인
+- Rubber 표면 착지 및 접촉 시 스파크가 발생하지 않음 확인
+- Metal 및 Cable 표면에서 각각 의도된 스파크 및 특수 연출이 안정적으로 재생될 수 있는 기반 완성
+- `SparkComponent` 및 `SparkCharacter`의 주요 함수들을 기능별 헬퍼 함수로 분리하여 가독성과 유지보수성 대폭 향상
+
+### 관련 Commit 및 Issue
+
+- **Jira Issue**: [SPARK-26](https://dalyeou.atlassian.net/browse/SPARK-26), [SPARK-27](https://dalyeou.atlassian.net/browse/SPARK-27), [SPARK-28](https://dalyeou.atlassian.net/browse/SPARK-28) (모두 완료 처리)
+
+---
+
 # Daily Log Template
 
 아래 Template을 복사하여 일일 개발 기록에 사용한다.

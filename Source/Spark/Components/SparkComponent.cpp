@@ -4,9 +4,11 @@
 #include "Engine/PointLight.h"
 #include "Engine/World.h"
 #include "NiagaraFunctionLibrary.h"
-#include "NiagaraSystem.h"
 
 #include "Data/SparkEffectData.h"
+#include "Data/SparkSurfaceData.h"
+#include "Utility/SparkSurfaceLibrary.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
 
 USparkComponent::USparkComponent()
 {
@@ -76,22 +78,80 @@ void USparkComponent::StartLightFadeOut(UPointLightComponent* LightComponent, fl
     World->GetTimerManager().SetTimer(*FadeHandle, FadeDelegate, 0.03f, true);
 }
 
-void USparkComponent::ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal)
+bool USparkComponent::ApplySurfaceOverride(const FHitResult& HitResult, FSparkEffectData& InOutEffectData) const
 {
-    // 조명 스폰
-    SpawnSparkLight(Location, EffectData.LightIntensity, EffectData.LightRadius, EffectData.LightDuration);
-    
-    // 파티클 스폰
-    if (EffectData.ParticleSystem && GetWorld())
+    if (!SparkSurfaceDataAsset)
     {
-        const FRotator SparkRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
-        UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), EffectData.ParticleSystem, Location, SparkRotation);
+        return true; // 표면 데이터 에셋이 없으면 기본 행동 FX 그대로 재생
     }
+
+    const ESparkSurfaceType SurfaceType = USparkSurfaceLibrary::GetSurfaceType(HitResult);
+    const FSparkSurfaceData& SurfaceData = SparkSurfaceDataAsset->GetSurfaceData(SurfaceType);
+
+    // 스파크 발생이 비활성화된 표면이면 즉시 차단
+    if (!SurfaceData.bCanGenerateSpark)
+    {
+        return false;
+    }
+
+    // 표면 전용 파티클이 지정되어 있으면 파티클 오버라이드
+    if (SurfaceData.EffectData.ParticleSystem)
+    {
+        InOutEffectData.ParticleSystem = SurfaceData.EffectData.ParticleSystem;
+    }
+
+    // 표면 전용 조명 수치가 설정되어 있으면 조명 파라미터 오버라이드
+    if (SurfaceData.EffectData.LightIntensity > 0.0f)
+    {
+        InOutEffectData.LightIntensity = SurfaceData.EffectData.LightIntensity;
+        InOutEffectData.LightRadius = SurfaceData.EffectData.LightRadius;
+        InOutEffectData.LightDuration = SurfaceData.EffectData.LightDuration;
+    }
+
+    return true;
 }
 
-void USparkComponent::TriggerLandingSpark(const FVector& Location, const FVector& Normal, float Fallspeed)
+void USparkComponent::ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal, const FHitResult& HitResult)
 {
-    // 바닥 메쉬 내부에 파묻히거나 콜리전 스킨 여유값에 걸쳐 파티클이 간헐적으로 막히지 않도록 표면에서 충분히 띄워줌
+    // 표면 검사 및 오버라이드
+    FSparkEffectData FinalFXData = EffectData;
+    if (!ApplySurfaceOverride(HitResult, FinalFXData)) return;
+    // 조명 스폰
+    SpawnSparkLight(Location, FinalFXData.LightIntensity, FinalFXData.LightRadius, FinalFXData.LightDuration);
+    
+    // 파티클 스폰
+    if (FinalFXData.ParticleSystem && GetWorld())
+    {
+        const FRotator SparkRotation = FRotationMatrix::MakeFromZ(Normal).Rotator();
+        UNiagaraFunctionLibrary::SpawnSystemAtLocation(GetWorld(), FinalFXData.ParticleSystem, Location, SparkRotation);
+    }
+    
+    // 디버그 로그 출력 (파티클 이름, 머티리얼/표면 정보, 조명 파라미터)
+    const FString ParticleName = FinalFXData.ParticleSystem ? FinalFXData.ParticleSystem->GetName() : TEXT("None");
+    const FString PhysMatName = HitResult.PhysMaterial.IsValid() ? HitResult.PhysMaterial->GetName() : TEXT("None");
+  
+    FString RenderMatName = TEXT("None");
+    if (UPrimitiveComponent* HitComp = HitResult.GetComponent())
+    {
+        if (UMaterialInterface* Mat = HitComp->GetMaterial(0))
+        {
+            RenderMatName = Mat->GetName();
+        }
+    }
+  
+    const ESparkSurfaceType SurfaceType = USparkSurfaceLibrary::GetSurfaceType(HitResult);
+    const FString SurfaceName = UEnum::GetValueAsString(SurfaceType);
+  
+    UE_LOG(LogTemp, Log, TEXT("[SparkFX] Particle: %s | Surface: %s | PhysMaterial: %s | RenderMaterial: %s | Intensity: %.1f | Radius: %.1f | Duration: %.2fs"),
+        *ParticleName, *SurfaceName, *PhysMatName, *RenderMatName, FinalFXData.LightIntensity, FinalFXData.LightRadius, FinalFXData.LightDuration);
+}
+
+void USparkComponent::TriggerLandingSpark(const FHitResult& HitResult, float Fallspeed)
+{
+    const FVector Location = !HitResult.ImpactPoint.IsNearlyZero() ? HitResult.ImpactPoint : HitResult.Location;
+    const FVector Normal = !HitResult.ImpactNormal.IsNearlyZero() ? HitResult.ImpactNormal : FVector::UpVector;
+    
+    // 바닥 메쉬 내부에 파묻혀 파티클이 막히지 않도록 살짝 띄워주기
     const FVector SpawnLocation = Location + (Normal * 1.0f);
     
     // 기본 fallback 값
@@ -121,12 +181,14 @@ void USparkComponent::TriggerLandingSpark(const FVector& Location, const FVector
     // 조명 지속 시간: 낮은곳에서 낙하(약 0.8초) ~ 높은곳에서 낙하(최대 1.2초) 가변 조절
     FXData.LightDuration = FMath::Clamp(FXData.LightDuration + (ExcessSpeed * 0.00035f), FXData.LightDuration, FXData.MaxLightDuration);
     
-    ExecuteSparkFX(FXData, SpawnLocation, Normal);
+    ExecuteSparkFX(FXData, SpawnLocation, Normal, HitResult);
 }
 
-void USparkComponent::TriggerWallSlideSpark(const FVector& Location, const FVector& WallNormal)
+void USparkComponent::TriggerWallSlideSpark(const FHitResult& HitResult)
 {
-    const FVector SpawnLocation = Location + (WallNormal * 5.0f);
+    const FVector Location = !HitResult.ImpactPoint.IsNearlyZero() ? HitResult.ImpactPoint : HitResult.Location;
+    const FVector Normal = !HitResult.ImpactNormal.IsNearlyZero() ? HitResult.ImpactNormal : FVector::ForwardVector;
+    const FVector SpawnLocation = Location + (Normal * 5.0f);
     
     // 기본 Fallback 값
     FSparkEffectData FXData;
@@ -140,12 +202,14 @@ void USparkComponent::TriggerWallSlideSpark(const FVector& Location, const FVect
         FXData = SparkEffectDataAsset->WallSlideData;
     }
     
-    ExecuteSparkFX(FXData, SpawnLocation, WallNormal);
+    ExecuteSparkFX(FXData, SpawnLocation, Normal, HitResult);
 }
 
-void USparkComponent::TriggerWallJumpSpark(const FVector& Location, const FVector& WallNormal)
+void USparkComponent::TriggerWallJumpSpark(const FHitResult& HitResult)
 {
-    const FVector SpawnLocation = Location + (WallNormal * 10.0f);
+    const FVector Location = !HitResult.ImpactPoint.IsNearlyZero() ? HitResult.ImpactPoint : HitResult.Location;
+    const FVector Normal = !HitResult.ImpactNormal.IsNearlyZero() ? HitResult.ImpactNormal : FVector::ForwardVector;
+    const FVector SpawnLocation = Location + (Normal * 5.0f);
     
     // 기본 fallback 값
     FSparkEffectData FXData;
@@ -159,5 +223,5 @@ void USparkComponent::TriggerWallJumpSpark(const FVector& Location, const FVecto
         FXData = SparkEffectDataAsset->WallJumpData;
     }
     
-    ExecuteSparkFX(FXData, SpawnLocation, WallNormal);
+    ExecuteSparkFX(FXData, SpawnLocation, Normal, HitResult);
 }

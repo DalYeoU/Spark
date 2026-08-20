@@ -1209,6 +1209,223 @@ flowchart LR
 
 ---
 
+## 2026-08-18 — SPARK-30~37 착수 전 기본 조명 세팅, Surface 오버라이드 데이터 버그 수정, Wall Slide Spark 컴파일 버그 수정
+
+**Milestone:** Phase 1 — Core Prototype
+**Category:** Lighting / Data Asset / Bugfix
+**Status:** Partially Completed (조명 색상 이슈 미해결)
+**Branch:** feature/movement
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- SPARK-30~37(Spark 연출/조명 심화 작업) 착수 전, `05_Art_Direction.md`의 Lighting Direction(암실 기반, Spark가 유일한 주요 광원)에 맞춘 TestLevel 기본 조명 세팅
+- 착지 Spark의 빛 색상이 주황이 아닌 흰색으로 클리핑되는 현상 원인 조사
+
+### 작업 내용
+
+1. **`UpdateWallSlideSpark` 컴파일 버그 수정** (`SparkCharacter.h/.cpp`):
+   - `CheckWallSlide()`에서 인자 없이 호출하던 `UpdateWallSlideSpark()`가 실제 정의(`const FHitResult&` 필요)와 시그니처 불일치, 헤더에 선언 자체가 누락되어 있었음. 조명 작업과 무관하게 이전부터 존재하던 빌드 불가 상태였음.
+   - 헤더에 선언 추가, 호출부에 `HitResult` 인자 전달로 수정. 조명 작업 시작 시 재컴파일 과정에서 발견됨.
+2. **`ApplySurfaceOverride` Surface 데이터 오버라이드 버그 수정** (`DA_SurfaceData`):
+   - `FSparkEffectData::LightIntensity` 기본값이 `6000.0f`(0이 아님)라서, `ApplySurfaceOverride()`의 `if (SurfaceData.EffectData.LightIntensity > 0.0f)` 판별 조건이 표면별로 커스터마이징하지 않은 상태에서도 항상 참이 되어, `DA_SparkEffect_Default`(Landing/WallSlide/WallJump/Cable)에서 설정한 값을 매번 `DA_SurfaceData.DefaultData`의 값으로 덮어쓰고 있었음.
+   - `DA_SurfaceData`의 `DefaultData`/`MetalData`/`CableData`의 `EffectData.LightIntensity/Radius/Duration`을 명시적으로 `0`으로 설정하여 "오버라이드 없음" 상태로 정정.
+3. **TestLevel 기본 조명 세팅 (Art Direction 준수)**:
+   - 초기에는 밝은 야외 하늘(SunLight+SkyAtmosphere+SkyLight) 구성으로 시작했으나, `05_Art_Direction.md`의 "환경광은 완전한 암흑 방지 역할만 수행" 원칙과 배치됨을 뒤늦게 인지하고 방향 전환
+   - SkyAtmosphere/원본 DirectionalLight/SkyLight 제거, 최소 암전 방지용 `DimAmbientFill`(단일 Directional Light, 은은한 색) + `PostProcessVolume`(Auto Exposure Histogram) 조합으로 재구성
+
+### 문제
+
+- Spark 착지 시 발광 색상이 코드상 `DefaultLightColor = (1.0, 0.6, 0.2)`(주황)로 정확히 설정돼 있음에도, 화면에는 흰색/차가운 색 계열로 렌더링됨
+- 특정 시점(레벨/조명 세팅의 한 조합)에서는 동일 코드로 정상적인 주황빛이 확인됐으나, 이후 동일 설정을 재현해도 흰색으로 렌더링되는 비결정적 현상 발생
+
+### 원인
+
+- 확정된 원인 없음. 조사 과정에서 다음 사실들을 확인했으나 최종 원인은 특정하지 못함:
+  - `r.DefaultFeature.AutoExposure = 0` (프로젝트 세팅으로 비활성화됨) — PostProcessVolume의 Auto Exposure Method/Min·Max Brightness/EV100/HistogramLogMin·Max는 전부 무시되고, `AutoExposureBias`만 유효하게 작동함. 이로 인해 이날 진행한 대부분의 노출 관련 조정이 실제로는 아무 효과가 없었음
+  - Niagara `NS_Spark_Landing`의 `Initialize Particle` 모듈 Color(1.0, 0.6, 0.2)와 `Scale Color`(RGB 배율 1.0)는 정상이며 색을 부풀리지 않음
+  - Bloom Intensity, Tone Curve Amount, TSR Flicker Rejection, Anti-Aliasing Method, Local Exposure Highlight/Shadow Contrast — 모두 개별적으로 비활성화/조정하여 테스트했으나 흰색 렌더링에 영향 없음
+  - 동일 Intensity/Radius/Duration(로그로 실측 확인, 15000/1000/0.8) 및 동일 조명 설정(`DimAmbientFill` 색상/밝기, PPV Bias)으로 재현을 시도했으나 결과가 재현되지 않음
+
+### 시도한 방법
+
+1. PostProcessVolume Auto Exposure Method를 Manual → Histogram으로 전환, Min/Max Brightness 반복 조정
+2. `DA_SparkEffect_Default`의 Light Intensity/Radius를 6000→15000 등으로 조정 (Surface 오버라이드 버그로 인해 초기 시도는 무효했음, 버그 수정 후 재시도)
+3. Bloom Intensity 0, Tone Curve Amount 0(필름틱 커브 우회), `r.TSR.ShadingRejection.Flickering 0`, `r.AntiAliasingMethod 2`, `r.TonemapperGamma 2.2` 콘솔 명령으로 개별 테스트
+4. Local Exposure Highlight/Shadow Contrast Scale을 1.0(압축 없음)으로 재정의
+5. 에디터 완전 재시작으로 콘솔 변수 잔존 여부 배제
+6. 세션 시작 시점(2026-08-14 오토세이브)까지 레벨을 되돌려 스크립트를 단계별로 재실행하며 재현 시도 (조사 중 중단, 문서 작업으로 전환)
+
+### 해결
+
+- 미해결. `UpdateWallSlideSpark` 컴파일 버그와 Surface 오버라이드 데이터 버그는 해결됨
+
+### 결과
+
+- 빌드 가능 상태 복구, Surface 데이터 오버라이드 버그로 인한 잠재적 회귀 제거
+- TestLevel 기본 조명은 Art Direction 원칙(암실 + 최소 암전 방지)에 맞게 재구성됨
+- Spark 발광 색상 이슈는 원인 불명 상태로 남음
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| Editor 컴파일 | Pass | UpdateWallSlideSpark 수정 후 |
+| Surface 오버라이드 수정 확인 | Pass | 로그로 Intensity/Radius 반영 확인 |
+| Spark 발광 색상 재현 | Fail | 동일 조건 재현 불가 |
+
+### 결정
+
+- 조명 관련 트러블슈팅 스크립트는 `Content/Developer/_scripts/`에 진단용으로 남겨두되, Spark 데이터/코드 변경은 모두 원복하고 조명 세팅만 유지
+- 색상 문제는 스크립트 기반 설정 비교로는 원인을 특정할 수 없다고 판단, GPU 프레임 캡처(RenderDoc) 등 실측 도구가 필요하다고 결론
+
+### 알려진 문제
+
+- Spark 착지 시 발광 색상이 의도된 주황빛이 아닌 흰색 계열로 렌더링됨 (재현 조건 불명)
+- `r.DefaultFeature.AutoExposure = 0`으로 인해 PostProcessVolume의 Auto Exposure 관련 대부분의 필드가 무의미함 — 이 프로젝트 세팅 자체를 유지할지, 노출을 프로젝트 차원에서 다시 설계할지 결정 필요
+
+### 다음 작업
+
+- RenderDoc으로 Spark 발광 프레임을 캡처하여 픽셀 단위로 색상이 어느 렌더 패스에서 변형되는지 확인
+- `r.DefaultFeature.AutoExposure` 비활성화가 프로젝트 전체 노출 전략과 의도적으로 일치하는지 확인 (의도된 것이라면 Manual/Physical Camera Exposure 기준으로 조명 문서 갱신 필요)
+- 위 조사 완료 후 SPARK-30~37 착수
+
+### 관련 자료
+
+- Related Document: [05_Art_Direction.md](../05_Art_Direction.md)
+
+---
+
+## 2026-08-19 — RenderDoc 실측으로 Spark 발광 색상 클리핑 원인 규명 및 착지 조명 위치 버그 수정
+
+**Milestone:** Phase 1 — Core Prototype
+**Category:** Lighting / Rendering / Bugfix
+**Status:** Completed
+**Branch:** feature/movement
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 전날(2026-08-18) 설정값 비교만으로는 원인을 찾지 못한 "착지 스파크 발광이 흰색으로 클리핑되는 문제"를 RenderDoc으로 실측하여 원인을 특정하고 해결
+- Landing/WallSlide/WallJump 간 조명 밝기·퍼짐이 불균일한 문제 조사
+
+### 작업 내용
+
+1. **RenderDoc 연동**: 엔진 내장 `RenderDocPlugin` 활성화, Project Settings에서 `Auto attach on startup` 체크 및 실행 경로 등록. PIE 중 `F12`로 프레임 캡처.
+2. **레벨 내 DirectionalLight 중복 발견 및 제거**: RenderDoc 캡처 화면에 `"Multiple directional lights are competing to be the single one used for forward shading, translucent, water or volumetric fog"` 경고가 표시됨을 확인. 원본 레벨의 `DirectionalLight`(Intensity 0.005, 흰색)가 조명 세팅 스크립트의 `destroy_if_exists("SunLight")` 라벨 불일치로 인해 하루 종일 제거되지 않고 `DimAmbientFill`과 공존하고 있었음. 이 두 라이트가 Forward Shading(Niagara 파티클이 사용하는 반투명 렌더링 경로)에 쓰일 라이트 자리를 두고 밝기 기준으로 경쟁하면서, 같은 설정으로도 매번 다른 라이트가 선택되어 결과가 비결정적으로 보였던 것으로 추정.
+3. **Pixel History / Shader Debug로 톤매핑 파이프라인 실측**:
+   - `PostDOFTranslucency.SceneColor`(톤매핑 직전 HDR 원본) 값이 약 `(148~160, 89~95, 30~32)`로, 의도한 주황(`1.0, 0.6, 0.2`) 비율과 일치함을 확인 — 원본 색상 자체는 항상 정상이었음
+   - `EyeAdaptationBuffer`(노출 배율)와 `BloomY`(블룸 기여분)까지 개별 확인
+   - `auto_exposure_bias`를 `-6`, `-8`까지 낮추고 Bloom을 꺼도 최종 톤맵 출력이 여전히 `(1.0, 1.0, 1.0)`으로 클리핑되는 것을 확인 — 순수 노출/블룸 조정만으로는 해결 불가 판정
+4. **White Balance(White Temp)로 실질적 해결**: 원인을 완전히 특정하기보다, 최종 화면의 클리핑된 흰색을 다시 따뜻한 톤으로 되돌리는 실용적 접근으로 전환. `PostProcessVolume`의 `White Temp`를 기본값에서 `25000`까지 올려 최종 출력을 주황 계열로 복원. Local Exposure 관련 오버라이드는 색상 해결에 무관함을 확인하고 기본값으로 되돌림.
+5. **Landing Spark 조명 위치 버그 수정 (`SparkComponent.cpp`)**:
+   - Landing/WallSlide/WallJump 밝기 퍼짐을 비교하던 중, Landing만 유독 어둡고 좁게 보인다는 점에서 스폰 위치 차이를 의심
+   - `TriggerLandingSpark`의 스폰 오프셋이 `Normal * 1.0f`(1unit)로 WallSlide/WallJump(`Normal * 5.0f`)보다 훨씬 바닥에 가까워 조명이 바닥 메쉬에 파묻혀 있었음을 확인
+   - `ExecuteSparkFX`에서 파티클 위치(`Location`)와 조명 위치(`LightLocation = Location + Normal * 15.0f`)를 분리하여, 파티클은 기존처럼 바닥 가까이 스폰하고 조명만 더 높이 띄우도록 수정
+   - 조명이 캐릭터 발 옆에 가깝게 스폰되며 캐릭터 자신의 그림자가 바닥에 드리워지는 것을 확인, `SpawnSparkLight()`에서 `LightComponent->SetCastShadows(false)` 적용
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 착지 스파크 발광이 흰색으로 클리핑됨
+  - **원인**: (1) 레벨에 DirectionalLight가 중복 존재하여 Forward Shading용 라이트 선택이 비결정적이었음, (2) 6000~30000candela 수준의 PointLight Intensity가 노출/톤맵 조정만으로는 색상을 보존할 수 없을 만큼 극단적으로 컸음(원본 SceneColor는 항상 정상 주황이었으나 톤매핑 이후 클리핑)
+  - **해결**: 중복 라이트 제거 + PostProcessVolume `White Temp`를 강하게 올려 최종 톤을 주황 쪽으로 보정 (근본적인 노출 재설계 대신 실용적 색보정으로 마무리)
+- **문제**: Landing Spark만 다른 이벤트보다 어둡고 좁게 보임
+  - **원인**: Landing의 조명/파티클 스폰 오프셋이 바닥에 너무 가까워(1unit) 조명이 바닥 메쉬에 파묻힘
+  - **해결**: 파티클과 조명의 스폰 위치를 분리, 조명만 15unit 높이로 띄우고 그림자 캐스팅을 꺼서 캐릭터 자기 그림자 문제도 함께 해결
+
+### 결과
+
+- Landing/WallSlide/WallJump 모두 의도한 주황빛으로 일관되게 렌더링됨을 확인
+- 조명 밝기/퍼짐이 이벤트 간 균일해짐
+- TestLevel 기본 조명(DimAmbientFill Intensity, PostProcessVolume 설정)이 최종 확정됨
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| Editor 컴파일 | Pass | Landing 스폰 위치 분리 후 |
+| Landing 착지 발광 색상 | Pass | 주황빛 확인 |
+| WallSlide/WallJump 발광 색상 | Pass | 주황빛 확인 |
+| 캐릭터 자기 그림자 | Pass | 그림자 캐스팅 비활성화로 해결 |
+
+### 결정
+
+- 원인 규명(Auto Exposure/톤매퍼 동작 원리)보다 시각적 결과를 우선하여 White Temp 색보정으로 마무리. 근본적인 노출 파이프라인 재설계는 필요 시 별도 작업으로 분리.
+- 조명 관련 진단/설정 스크립트는 `Content/Developer/_scripts/`에 보관.
+
+### 알려진 문제
+
+- `r.DefaultFeature.AutoExposure = 0` 프로젝트 세팅과 노출 파이프라인의 정확한 동작 방식은 여전히 완전히 규명되지 않음 (실용적 우회로 해결했을 뿐, 근본 원인은 미상)
+
+### 다음 작업
+
+- SPARK-30~37 착수
+
+### 관련 자료
+
+- Related Document: [05_Art_Direction.md](../05_Art_Direction.md)
+
+---
+
+## 2026-08-20 — Phase 1 Core Prototype: Cable 구간 프로토타이핑 및 Overlap Spark 연동 (SPARK-32, SPARK-36)
+
+**Milestone:** Phase 1 — Core Prototype  
+**Category:** Level Design / Prototyping / Gameplay  
+**Status:** Completed  
+**Branch:** feature/movement  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 활성 스프린트 `Test Level 제작` 중 핵심 기믹인 어두운 통로(`SPARK-32`) 및 Cable 테스트 구간(`SPARK-36`) 제작 및 검증
+- 외부 아트 에셋 없이 엔진 기본 기능만으로 플레이어가 통과 가능한 천장 케이블 지형물 및 접촉 스파크 피드백 구현
+
+### 작업 내용
+
+1. **Jira 스프린트 점검 및 우선순위 조정**:
+   - 활성 스프린트(`Test Level 제작`, SPARK-30~37) 내 기본 이동/점프/벽 슬라이드 구간은 기구현 상태로 판정하고, 핵심 차별점인 어두운 통로(`SPARK-32`)와 Cable 구간(`SPARK-36`)에 집중하기로 결정.
+2. **에셋 없는 Cable 지형물 제작 (Graybox)**:
+   - 기본 `Cylinder` 메시를 Z축으로 길게 늘려 천장에 매달린 케이블 형태 제작.
+   - 머티리얼 에셋 생성 없이 디테일 패널의 `Phys Material Override`에 `PM_Cable`을 직접 지정.
+   - 충돌체 콜리전을 `Overlap`으로 설정하여 플레이어가 부딪혀 막히지 않고 몸으로 스치며 지나갈 수 있도록 구성.
+3. **블루프린트 승격 및 Overlap Spark 연동**:
+   - 배치된 인스턴스를 '블루프린트 변환' 아이콘을 통해 `BP_Cable`로 승격.
+   - 이벤트 그래프에서 `Event ActorBeginOverlap` 노드를 사용하여 `Other Actor` -> `ASparkCharacter` 캐스팅 후 `SparkComponent->SpawnSparkLight()` 호출.
+   - 케이블 접촉 시 밝기(`Intensity = 15000.0f`), 범위(`Radius = 800.0f`), 지속시간(`Duration = 1.5s`)의 강한 빛이 순간적으로 어둠을 밝히는 연출 연동 및 검증 완료.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 레벨에 배치된 스태틱 메시 인스턴스에 `+ Add`로 컴포넌트를 붙였을 때 디테일 패널에 Events 섹션 및 `OnComponentBeginOverlap`이 표시되지 않음.
+  - **원인**: 인스턴스에 `PhysicsVolume` 계열 컴포넌트가 추가되었거나 일반 레벨 인스턴스 단계에서는 블루프린트 전용 이벤트 생성 UI가 노출되지 않음.
+  - **해결**: 에디터 디테일 패널의 '블루프린트 변환' 기능을 통해 독립 블루프린트 액터(`BP_Cable`)로 승격한 뒤, 이벤트 그래프에서 `Event ActorBeginOverlap` 노드를 직접 꺼내 연결. 복제 배치(`Alt + 드래그`) 시에도 모든 케이블에서 스파크가 자동 작동하도록 재사용성 확보.
+
+### 결과
+
+- 어두운 통로 구간에서 천장 케이블을 통과할 때 주변이 강하게 밝혀지는 시각 피드백 검증 완료.
+- `SPARK-36 (Graybox: Cable 테스트 구간 제작)` 및 `SPARK-32 (Graybox: 어두운 통로 구간 제작)` 요구사항 충족.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| 케이블 관통(Overlap) 이동 | Pass | 충돌 막힘 없이 자연스럽게 통과 |
+| 접촉 시 Spark Light 생성 | Pass | Intensity 15000, Radius 800 주황 발광 확인 |
+| 케이블 다중 복제 배치 테스트 | Pass | Alt+드래그 복제 액터에서도 정상 발광 |
+
+### 결정
+
+- 프로토타입 단계에서는 `SpawnSparkLight()` 블루프린트 호출로 빠르게 검증하고, 향후 Phase 2/Production 진입 시 C++ 상호작용 인터페이스(`IInteractable`) 또는 공통 Overlap 메커니즘으로 고도화 예정.
+
+### 다음 작업
+
+- 남은 Graybox 구간(실패 영역 `SPARK-37`, 표면 비교 `SPARK-35`) 점검 및 Phase 1 최종 마무리 후 Phase 2(상호작용 시스템 `SPARK-41~44`) 착수.
+
+### 관련 자료
+
+- Related Document: [04_Level_Design.md](./04_Level_Design.md), [05_Art_Direction.md](./05_Art_Direction.md)
+
+---
+
 # Daily Log Template
 
 아래 Template을 복사하여 일일 개발 기록에 사용한다.

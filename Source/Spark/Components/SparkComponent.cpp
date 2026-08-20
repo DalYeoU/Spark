@@ -41,7 +41,13 @@ void USparkComponent::SpawnSparkLight(const FVector& Location, float Intensity, 
     LightComponent->SetIntensity(Intensity);
     LightComponent->SetAttenuationRadius(LightRadius);
     LightComponent->SetLightColor(DefaultLightColor);
-    
+    // 캐릭터 바로 옆에서 스폰되는 짧은 이펙트라, 그림자를 켜두면 캐릭터 자신의 그림자가 바닥에 드리워짐
+    LightComponent->SetCastShadows(false);
+    // 0.8~1.2초짜리 순간 플래시가 Lumen 간접광(GI)에 반영되면, Lumen이 그 빛을 캐시했다가
+    // 서서히 지우는 과정에서 벽/바닥에 잔상처럼 남는 현상이 생김. 이 정도로 짧은 VFX는
+    // 간접광 기여가 필요 없으므로 아예 제외해서 잔상을 원천 차단
+    LightComponent->SetAffectDynamicIndirectLighting(false);
+
     // 잔광 페이드: Duration에 걸쳐 Intensity를 세제곱 커브로 감소시켜 "빠르게 감소" 느낌을 줌
     StartLightFadeOut(LightComponent, Intensity, Duration);
     LightActor->SetLifeSpan(Duration);
@@ -116,8 +122,9 @@ void USparkComponent::ExecuteSparkFX(const FSparkEffectData& EffectData, const F
     // 표면 검사 및 오버라이드
     FSparkEffectData FinalFXData = EffectData;
     if (!ApplySurfaceOverride(HitResult, FinalFXData)) return;
-    // 조명 스폰
-    SpawnSparkLight(Location, FinalFXData.LightIntensity, FinalFXData.LightRadius, FinalFXData.LightDuration);
+    // 조명은 파티클보다 더 높이 띄워서 바닥/캐릭터에 파묻히지 않게 함
+    const FVector LightLocation = Location + (Normal * 15.0f);
+    SpawnSparkLight(LightLocation, FinalFXData.LightIntensity, FinalFXData.LightRadius, FinalFXData.LightDuration);
     
     // 파티클 스폰
     if (FinalFXData.ParticleSystem && GetWorld())
@@ -151,9 +158,9 @@ void USparkComponent::TriggerLandingSpark(const FHitResult& HitResult, float Fal
     const FVector Location = !HitResult.ImpactPoint.IsNearlyZero() ? HitResult.ImpactPoint : HitResult.Location;
     const FVector Normal = !HitResult.ImpactNormal.IsNearlyZero() ? HitResult.ImpactNormal : FVector::UpVector;
     
-    // 바닥 메쉬 내부에 파묻혀 파티클이 막히지 않도록 살짝 띄워주기
-    const FVector SpawnLocation = Location + (Normal * 1.0f);
-    
+    // 바닥 메쉬 내부에 파묻혀 파티클/조명이 막히지 않도록 띄워주기 (WallSlide/WallJump와 동일하게 5unit)
+    const FVector SpawnLocation = Location + (Normal * 5.0f);
+
     // 기본 fallback 값
     FLandingSparkEffectData FXData;
     FXData.LightIntensity = 6000.0f;

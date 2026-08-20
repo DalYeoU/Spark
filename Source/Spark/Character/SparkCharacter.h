@@ -73,6 +73,9 @@ protected:
     // Wall Slide 중 낙하 속도를 WallSlideSpeed로 제한
     void ClampFallSpeedForWallSlide();
 
+    // Wall Slide 중 주기적으로 마찰 Spark 연출을 갱신
+    void UpdateWallSlideSpark(const FHitResult& HitResult);
+
     // Wall Jump 실행 로직 (LaunchCharacter 호출)
     void DoWallJump();
     

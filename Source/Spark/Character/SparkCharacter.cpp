@@ -194,7 +194,7 @@ void ASparkCharacter::CheckWallSlide()
         ClampFallSpeedForWallSlide();
         
         // 마찰 스파크 연출 갱신
-        UpdateWallSlideSpark();
+        UpdateWallSlideSpark(HitResult);
     }
     else
     {

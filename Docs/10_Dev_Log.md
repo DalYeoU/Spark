@@ -1426,6 +1426,192 @@ flowchart LR
 
 ---
 
+## 2026-08-21 — Phase 2 Interaction: 상호작용 대상 탐지 및 IInteractable 인터페이스 구현 (SPARK-41)
+
+**Milestone:** Phase 2 — Interaction System  
+**Category:** Gameplay / Architecture / C++  
+**Status:** Completed  
+**Branch:** feature/interaction  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 상호작용 가능한 월드 오브젝트의 표준 규약인 `IInteractable` 인터페이스 정의
+- `USparkInteractionComponent`를 구현하여 타이머 기반 전방 Sweep 트레이스를 통한 상호작용 대상 탐지 및 캐싱
+- 플레이어 입력(`IA_Interact`, E키) 시 상호작용 대상에게 인터랙션 이벤트를 전달하는 시스템 연동 및 검증
+
+### 작업 내용
+
+1. **상호작용 인터페이스 구현 (`Interactable.h / .cpp`)**:
+   - `UINTERFACE(MinimalAPI, BlueprintType, Blueprintable)` 및 `IInteractable` 선언.
+   - C++ 및 블루프린트 오버라이드를 모두 지원하도록 `UFUNCTION(BlueprintNativeEvent, BlueprintCallable)` 매크로와 `_Implementation` 기본 가상 함수 구성 (`CanInteract`, `Interact`, `GetInteractionText`).
+2. **상호작용 컴포넌트 구현 (`USparkInteractionComponent`)**:
+   - 프레임 최적화와 장기적 안정성을 위해 `Tick`을 비활성화하고 0.1초 주기의 `FTimerHandle` 기반 `PerformInteractionCheck` 탐지 로직 적용.
+   - 캐릭터 정면 기준 `SweepSingleByChannel` (Sphere Trace)를 수행하여 시선/정면 내 `IInteractable` 구현 액터 감지 및 유효성(`CanInteract`) 검사.
+   - 대상 변경 시 UI 연동을 위한 다이내믹 멀티캐스트 델리게이트 `OnInteractionTargetChanged` 브로드캐스트.
+   - `PrimaryInteract()` 호출 시 캐시된 타겟에 대해 `IInteractable::Execute_Interact()` 실행.
+3. **플레이어 캐릭터 및 컨트롤러 연동**:
+   - `ASparkCharacter`에 `USparkInteractionComponent` 서브오브젝트 생성 및 `Interact()` 함수 연동.
+   - `ASparkPlayerController`에 `InteractAction` 프로퍼티 추가 및 `OnPossess()`에서 `IA_Interact` 바인딩.
+4. **인게임 검증**:
+   - `BP_TestInteractableActor`를 생성하여 `Interactable` 인터페이스를 구현하고 레벨에 배치하여 E키 입력 시 정상적으로 상호작용이 트리거됨을 확인.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1**: 블루프린트 Class Settings에서 `Interactable` 인터페이스 추가 후 My Blueprint의 Interfaces 항목에 함수 목록이 노출되지 않음.
+  - **원인**: C++ 인터페이스 함수가 순수 C++ 가상 함수(`virtual ... = 0;`)로만 선언되어 있어 UHT 리플렉션 시스템이 블루프린트 오버라이드 대상으로 인식하지 못함.
+  - **해결**: `UFUNCTION(BlueprintNativeEvent, BlueprintCallable)` 매크로와 `_Implementation` 기본 구현부를 추가하고, 컴포넌트 호출부에서는 `IInteractable::Execute_CanInteract()`, `IInteractable::Execute_Interact()`로 호출하도록 수정.
+- **문제 2**: 컴파일 시 `ULightComponentBase`의 `SetAffectDynamicIndirectLighting` 멤버 미인식 오류.
+  - **해결**: 이후 `bAffectDynamicIndirectLighting` 프로퍼티도 존재하지 않는 것으로 확인되어, 최종적으로 `SparkComponent.cpp`에서 `SetIndirectLightingIntensity(0.0f)` 호출로 대체 처리 (자세한 경위는 2026-08-24 항목 참고).
+
+### 결과
+
+- 상호작용 코어 아키텍처 구축 완료 및 인게임 E키 상호작용 동작 검증 완료.
+- `SPARK-41 (상호작용 대상 탐지 및 IInteractable 인터페이스 구현)` 완료.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| IInteractable 인터페이스 블루프린트 오버라이드 | Pass | CanInteract, Interact, GetInteractionText 노출 및 구현 확인 |
+| 전방 Sphere Sweep 대상 탐지 | Pass | 0.1초 타이머 기반 정상 감지 |
+| E 키 입력 시 상호작용 실행 | Pass | PIE 환경에서 "상호작용 성공!" 정상 출력 |
+
+### 결정
+
+- 상호작용 감지는 Tick 부하를 방지하기 위해 0.1초 주기의 Timer를 유지하고, 다음 작업인 UI 프롬프트 표시(`SPARK-42`) 시 `OnInteractionTargetChanged` 델리게이트를 구독하여 처리하기로 결정.
+
+### 다음 작업
+
+- `SPARK-42`: Interaction Prompt UI 구현 (위젯 블루프린트 및 타겟 변경 델리게이트 연동)
+
+### 관련 자료
+
+- Related Document: [02_Architecture.md](./02_Architecture.md), [03_Gameplay_Framework.md](./03_Gameplay_Framework.md), [07_Coding_Convention.md](./07_Coding_Convention.md)
+
+---
+
+## 2026-08-24 — 기본 조명 스크립트 재사용화, 막힌 공간 암전 방지, Lumen GI 잔상 버그 해결
+
+**Milestone:** Phase 1 — Core Prototype
+**Category:** Lighting / Rendering / Bugfix
+**Status:** Completed
+**Branch:** feature/movement
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 2026-08-19에 TestLevel 하나에 한정해 확정한 기본 조명 세팅을, 다른 레벨에서도 한 번에 재현할 수 있는 스크립트로 정리
+- 천장이 있는 막힌 통로에서 기본 암전 조명이 아예 작동하지 않는 문제 해결
+- 스파크 발생 후 이동하면 벽/바닥에 캐릭터 형태의 잔상이 남는 문제 조사 및 해결
+
+### 작업 내용
+
+1. **`apply_spark_base_lighting.py` 작성 (`Content/Developer/_scripts/`)**:
+   - 기존 SkyAtmosphere/SkyLight/DirectionalLight를 **이름이 아니라 클래스 기준으로** 전부 제거한 뒤 `DimAmbientFill` 하나만 새로 생성하도록 작성. 2026-08-19에 라벨 불일치로 원본 라이트가 안 지워져 중복 조명 버그가 생겼던 실수를 재발 방지 구조로 반영.
+   - `DimAmbientFill` 색/밝기, `PostProcessVolume`(Auto Exposure Bias, White Temp) 값을 하나의 스크립트로 통합, 다른 레벨에서 그대로 실행 가능하도록 구성.
+   - 실험 과정에서 쌓인 임시 진단/단계별 스크립트(`step1~6`, `dump_*`, `test_*` 등) 정리, 재사용 가능한 스크립트만 유지.
+2. **막힌 통로에서 암전 조명이 안 보이는 문제 수정**:
+   - `DimAmbientFill`이 `DirectionalLight`(한 방향에서 오는 평행광)라서, 천장/막힌 통로에서는 물리적으로 완전히 차단되어 열린 공간과 달리 아무 빛도 안 들어오는 현상 확인
+   - 이 라이트는 "완전한 암흑 방지"용 인공 채움광이라 물리적 정확성이 불필요하다고 판단, `CastShadows = False`로 설정하여 지형을 뚫고 항상 최소 조도를 보장하도록 수정
+3. **Landing Spark 발생 후 잔상(Ghosting) 버그 조사**:
+   - 스파크 발생 후 캐릭터가 이동하면 이전 위치의 벽/바닥에 캐릭터 실루엣 형태의 어두운 잔상이 남는 현상 발견 (벽/모서리 유무와 무관하게 어디서든 재현)
+   - 1차 가설(TSR 안티에일리어싱 리프로젝션 고스팅, `r.AntiAliasingMethod 2`)과 2차 가설(Virtual Shadow Map 캐싱, `r.Shadow.Virtual.Cache 0`) 모두 콘솔 명령으로 테스트했으나 효과 없음
+   - `r.DynamicGlobalIlluminationMethod 0`(Lumen 간접광 비활성화)으로 테스트한 결과 잔상이 사라짐을 확인 — Lumen이 짧고 강한 동적 라이트(Spark PointLight)의 간접광 기여를 캐시했다가 여러 프레임에 걸쳐 점진적으로 지우는 과정에서 잔상처럼 보인 것으로 결론
+   - `SparkComponent.cpp`의 `SpawnSparkLight()`에 `LightComponent->SetIndirectLightingIntensity(0.0f)` 추가(스파크 자체 라이트의 간접광 기여 차단)와 함께, 프로젝트 차원에서 `r.DynamicGlobalIlluminationMethod`를 `1`(Lumen)에서 `0`(None)으로 영구 변경
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 막힌 통로에서 기본 암전 조명이 전혀 작동하지 않음
+  - **원인**: `DirectionalLight`는 평행광이라 천장에 물리적으로 완전히 차단됨
+  - **해결**: `DimAmbientFill`의 `CastShadows`를 꺼서 모든 지형을 무시하고 항상 빛이 도달하도록 함
+- **문제**: 스파크 발생 후 이동 시 벽/바닥에 캐릭터 잔상이 남음
+  - **원인**: Lumen 간접광(GI)이 짧고 강한 동적 라이트의 기여분을 여러 프레임에 걸쳐 점진적으로만 갱신/제거하기 때문
+  - **해결**: 프로젝트 전체 Lumen GI 비활성화 (`r.DynamicGlobalIlluminationMethod=0`, `Config/DefaultEngine.ini`). Spark의 아트 컨셉(암실 + 국소 플래시 위주, 부드러운 GI 바운스 불필요)과도 부합하고, 성능 이점도 확인됨
+
+### 결과
+
+- 어떤 레벨에서든 `apply_spark_base_lighting.py` 실행 한 번으로 확정된 기본 조명 세팅 재현 가능
+- 천장/막힌 구간에서도 최소 암전 방지 조명 정상 작동
+- 스파크 발생 후 잔상 현상 완전히 사라짐 확인
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| 막힌 통로 기본 조명 | Pass | 천장 유무와 무관하게 실루엣 확보 |
+| 스파크 발생 후 이동 시 잔상 | Pass | Lumen GI 비활성화 후 재현 안 됨 |
+| 다른 레벨에서 스크립트 재실행 | Pass | 동일 조명 세팅 재현 확인 |
+
+### 결정
+
+- Lumen GI는 이 프로젝트의 아트 방향과 맞지 않는다고 판단, 근본적으로 비활성화. 추후 부드러운 간접광 바운스가 필요한 구간이 생기면 그때 다시 검토
+- 조명 세팅은 레벨마다 수동으로 맞추지 않고 스크립트로 일괄 재현하는 방식을 표준 워크플로우로 채택
+
+### 다음 작업
+
+- Phase 2 Interaction 작업 이어서 진행
+
+### 관련 자료
+
+- Related Document: [05_Art_Direction.md](./05_Art_Direction.md)
+
+---
+
+## 2026-08-24 — Phase 2 Interaction: Interaction Prompt UI 구현 및 시선 각도/탐지 범위 튜닝 (SPARK-42)
+
+**Milestone:** Phase 2 — Interaction System  
+**Category:** UI / Gameplay / C++  
+**Status:** Completed  
+**Branch:** feature/interaction  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 상호작용 가능한 대상 포커스 시 화면에 키 안내 및 상호작용 문구를 표시하고, 대상에서 벗어나면 자동으로 숨겨지는 Interaction Prompt UI 구축
+- `SparkPlayerController` 및 `SparkInteractionComponent`와 연동하여 안정적인 뷰포트 등록 및 생명주기 관리
+- 과도한 원거리 감지 및 뒤돌아선 상태에서의 오작동을 방지하기 위한 정밀 시선 각도(Dot Product) 및 사거리 튜닝
+
+### 작업 내용
+
+1. **`USparkInteractionPromptWidget` C++ 베이스 클래스 구현 (`Source/Spark/UI/`)**:
+   - `NativeConstruct()`에서 소유 폰의 `USparkInteractionComponent`를 탐색하고 `OnInteractionTargetChanged` 델리게이트 바인딩.
+   - `NativeDestruct()`에서 약참조(`CachedInteractionComponent`)를 검증하여 델리게이트 안전 해제.
+   - `HandleInteractionTargetChanged`: 타겟 유효 시 `IInteractable::Execute_GetInteractionText`로 텍스트 갱신 후 `SelfHitTestInvisible` 표시 및 `BP_OnShowPrompt` 호출. 타겟 부재 시 `Collapsed` 처리.
+2. **`WBP_InteractionPrompt` 위젯 블루프린트 제작 (`Content/Spark/UI/HUD/`)**:
+   - `USparkInteractionPromptWidget`을 상속받아 화면 중앙 하단에 `[E]` 키 가이드와 `InteractionText` (`UTextBlock`, BindWidget) 배치.
+3. **`ASparkPlayerController` 연동**:
+   - `InteractionPromptWidgetClass` 프로퍼티 추가 및 `BeginPlay()`에서 위젯을 인스턴스화하여 뷰포트에 추가.
+4. **시선 각도 및 탐지 사거리 정밀 튜닝 (Troubleshooting)**:
+   - 근접 상태에서 등 뒤나 옆을 보고 있어도 초기 겹침(Initial Overlap)으로 인해 프롬프트가 뜨던 문제 해결: 트레이스 시작점을 캐릭터 전방으로 20unit 전진시키고, 캐릭터 정면 벡터와 대상 방향 벡터 간의 2D 내적(`Dot >= 0.5f`, 정면 60도 이내) 검사 추가.
+   - 3인칭 시점에 적합하도록 탐지 사거리를 `50.0f` (기존 250.0f), 구체 반지름을 `20.0f` (기존 40.0f)로 타이트하게 축소 튜닝.
+5. **C++ 코드 주석 및 수명 안전성 강화**:
+   - `SparkInteractionComponent.cpp`, `SparkInteractionPromptWidget.cpp`, `SparkComponent.cpp`(`StartLightFadeOut`의 세제곱 감쇠 커브 및 람다 캡처 수명 관리)에 상세한 한국어 주석 보강.
+
+### 결과
+
+- 상호작용 대상을 적절한 거리에서 정면으로 바라볼 때만 `[E] 문구`가 표시되고, 시선을 돌리거나 멀어지면 즉시 숨겨지는 프롬프트 UI 흐름 검증 완료.
+- `SPARK-42 (Interaction Prompt UI 구현)` 완료.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| WBP_InteractionPrompt 생성 및 뷰포트 등록 | Pass | PlayerController BeginPlay에서 정상 초기화 |
+| 타겟 감지 시 InteractionText 자동 갱신 | Pass | 대상 인터페이스의 GetInteractionText 정상 출력 |
+| 시선 회전 시 즉각 숨김 처리 | Pass | Dot < 0.5f 조건 및 타겟 이탈 시 Collapsed 처리 |
+| 등 뒤 / 측면 근접 오작동 방지 | Pass | 전방 60도 이내에서만 활성화 확인 |
+
+### 다음 작업
+
+- `SPARK-43`: 장치 활성화 및 문 열기 상호작용 구현 (IInteractable을 상속받은 첫 실제 퍼즐/기믹 액터 제작)
+
+### 관련 자료
+
+- Related Document: [02_Architecture.md](./02_Architecture.md), [06_UI_UX.md](./06_UI_UX.md), [07_Coding_Convention.md](./07_Coding_Convention.md)
+
+---
+
 # Daily Log Template
 
 아래 Template을 복사하여 일일 개발 기록에 사용한다.

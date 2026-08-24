@@ -46,13 +46,14 @@ void USparkComponent::SpawnSparkLight(const FVector& Location, float Intensity, 
     // 0.8~1.2초짜리 순간 플래시가 Lumen 간접광(GI)에 반영되면, Lumen이 그 빛을 캐시했다가
     // 서서히 지우는 과정에서 벽/바닥에 잔상처럼 남는 현상이 생김. 이 정도로 짧은 VFX는
     // 간접광 기여가 필요 없으므로 아예 제외해서 잔상을 원천 차단
-    LightComponent->SetAffectDynamicIndirectLighting(false);
+    LightComponent->SetIndirectLightingIntensity(0.0f);
 
     // 잔광 페이드: Duration에 걸쳐 Intensity를 세제곱 커브로 감소시켜 "빠르게 감소" 느낌을 줌
     StartLightFadeOut(LightComponent, Intensity, Duration);
     LightActor->SetLifeSpan(Duration);
 }
 
+// 조명 밝기를 시간에 따라 세제곱 커브로 감쇠시키는 함수
 void USparkComponent::StartLightFadeOut(UPointLightComponent* LightComponent, float Intensity, float Duration)
 {
     UWorld* World = GetWorld();
@@ -60,27 +61,38 @@ void USparkComponent::StartLightFadeOut(UPointLightComponent* LightComponent, fl
     
     const float StartIntensity = Intensity;
     const float StartTime = World->GetTimeSeconds();
+
+    // 람다 실행 시점엔 조명이 이미 파괴됐을 수도 있어서 약참조로 들고 있음
     TWeakObjectPtr<UPointLightComponent> WeakLight = LightComponent;
+
+    // 람다 안에서 자기 타이머(*FadeHandle)를 직접 해제해야 해서 SharedPtr로 핸들을 공유
     TSharedPtr<FTimerHandle> FadeHandle = MakeShared<FTimerHandle>();
-    
+
     FTimerDelegate FadeDelegate = FTimerDelegate::CreateLambda([WeakLight, World, StartTime, StartIntensity, Duration, FadeHandle]()
     {
+        // 조명이 이미 사라졌으면 타이머만 정리하고 종료
         if (!World || !WeakLight.IsValid())
         {
             if (World) World->GetTimerManager().ClearTimer(*FadeHandle);
             return;
         }
+
+        // 경과 시간으로 진행률(0~1) 계산
         const float Elapsed = World->GetTimeSeconds() - StartTime;
         const float Alpha = FMath::Clamp(Elapsed / Duration, 0.0f, 1.0f);
+
+        // 처음엔 빨리 어두워지고 끝으로 갈수록 천천히 꺼지게 하는 커브
         const float FadeMultiplier = FMath::Pow(1.0f - Alpha, 3.0f);
         WeakLight->SetIntensity(StartIntensity * FadeMultiplier);
 
+        // 다 끝났으면 타이머 해제
         if (Alpha >= 1.0f)
         {
             World->GetTimerManager().ClearTimer(*FadeHandle);
         }
     });
     
+    // 0.03초마다 갱신해서 부드럽게 꺼지는 것처럼 보이게 함
     World->GetTimerManager().SetTimer(*FadeHandle, FadeDelegate, 0.03f, true);
 }
 

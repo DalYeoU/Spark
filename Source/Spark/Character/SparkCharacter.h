@@ -7,6 +7,7 @@
 class USpringArmComponent;
 class UCameraComponent;
 class USparkComponent;
+class USparkInteractionComponent;
 struct FInputActionValue;
 
 /**
@@ -33,11 +34,17 @@ public:
     // 점프 실행 (Wall Slide 상태일 경우 Wall Jump로 분기)
     virtual void Jump() override;
 
+    // 상호작용 실행 입력 핸들러
+    void Interact();
+
     // 카메라 스프링암 컴포넌트 안전한 게터
     FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
 
     // 팔로우 카메라 컴포넌트 안전한 게터
     FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+
+    // 상호작용 컴포넌트 안전한 게터
+    FORCEINLINE USparkInteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
     
     // 낙사 또는 HazardZone 오버랩시 엔진에서 호출되는 사망/실패 처리 오버라이드 함수
     virtual void FellOutOfWorld(const class UDamageType& DamageType) override;
@@ -134,13 +141,15 @@ private:
     // Spark 연출 및 라이트 생성을 담당하는 컴포넌트
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spark", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<USparkComponent> SparkComponent;
+
+    // 상호작용 대상 탐지 및 상호작용 실행을 담당하는 컴포넌트
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<USparkInteractionComponent> InteractionComponent;
     
     // Wall Slide Spark 방출 타이밍 조절용 변수
     float LastWallSlideSparkTime = 0.0f;
     
     // 착지 충돌 결과에서 실제 밟고있는 머티리얼 정보를 반환
     FHitResult ResolveLandingHit(const FHitResult& InHit) const;
-    
-    // 벽 슬라이드 마찰 스파크 주기적 트리거 보조 함수
     
 };

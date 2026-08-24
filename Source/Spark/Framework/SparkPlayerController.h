@@ -43,4 +43,12 @@ private:
     // 캐릭터 점프 조작에 사용하는 입력 액션 에셋
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UInputAction> JumpAction;
+
+    // 캐릭터 상호작용 조작에 사용하는 입력 액션 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UInputAction> InteractAction;
+
+    // 뷰포트에 생성할 상호작용 프롬프트 위젯 클래스
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))
+    TSubclassOf<class UUserWidget> InteractionPromptWidgetClass;
 };

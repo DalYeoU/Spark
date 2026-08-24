@@ -9,6 +9,7 @@
 #include "InputActionValue.h"
 
 #include "Components/SparkComponent.h"
+#include "Components/SparkInteractionComponent.h"
 
 ASparkCharacter::ASparkCharacter()
 {
@@ -43,6 +44,17 @@ ASparkCharacter::ASparkCharacter()
     
     // SparkComponent 생성
     SparkComponent = CreateDefaultSubobject<USparkComponent>(TEXT("SparkComponent"));
+
+    // InteractionComponent 생성
+    InteractionComponent = CreateDefaultSubobject<USparkInteractionComponent>(TEXT("InteractionComponent"));
+}
+
+void ASparkCharacter::Interact()
+{
+    if (InteractionComponent)
+    {
+        InteractionComponent->PrimaryInteract();
+    }
 }
 
 void ASparkCharacter::BeginPlay()

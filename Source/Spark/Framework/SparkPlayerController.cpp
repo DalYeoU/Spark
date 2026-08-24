@@ -3,6 +3,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "Blueprint/UserWidget.h"
 #include "Character/SparkCharacter.h"
 
 ASparkPlayerController::ASparkPlayerController()
@@ -21,6 +22,15 @@ void ASparkPlayerController::BeginPlay()
         {
             // Priority 0으로 기본 입력 컨텍스트 등록
             Subsystem->AddMappingContext(DefaultMappingContext, 0);
+        }
+    }
+
+    // 상호작용 프롬프트 UI 생성 및 뷰포트 등록
+    if (IsLocalController() && InteractionPromptWidgetClass)
+    {
+        if (UUserWidget* PromptWidget = CreateWidget<UUserWidget>(this, InteractionPromptWidgetClass))
+        {
+            PromptWidget->AddToViewport();
         }
     }
 }
@@ -46,6 +56,10 @@ void ASparkPlayerController::OnPossess(APawn* InPawn)
             {
                 EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, SparkCharacter, &ASparkCharacter::Jump);
                 EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, SparkCharacter, &ASparkCharacter::StopJumping);
+            }
+            if (InteractAction)
+            {
+                EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, SparkCharacter, &ASparkCharacter::Interact);
             }
         }
     }

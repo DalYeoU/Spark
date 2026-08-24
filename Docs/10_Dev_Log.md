@@ -1586,7 +1586,7 @@ flowchart LR
    - 근접 상태에서 등 뒤나 옆을 보고 있어도 초기 겹침(Initial Overlap)으로 인해 프롬프트가 뜨던 문제 해결: 트레이스 시작점을 캐릭터 전방으로 20unit 전진시키고, 캐릭터 정면 벡터와 대상 방향 벡터 간의 2D 내적(`Dot >= 0.5f`, 정면 60도 이내) 검사 추가.
    - 3인칭 시점에 적합하도록 탐지 사거리를 `50.0f` (기존 250.0f), 구체 반지름을 `20.0f` (기존 40.0f)로 타이트하게 축소 튜닝.
 5. **C++ 코드 주석 및 수명 안전성 강화**:
-   - `SparkInteractionComponent.cpp`, `SparkInteractionPromptWidget.cpp`, `SparkComponent.cpp`(`StartLightFadeOut`의 세제곱 감쇠 커브 및 람다 캡처 수명 관리)에 상세한 한국어 주석 보강.
+   - `SparkInteractionComponent.cpp`, `SparkInteractionPromptWidget.cpp`, `SparkComponent.cpp`(`StartLightFadeOut`의 감쇠 커브 동작 및 람다 캡처 수명 관리)에 한국어 주석 보강. 이후 가독성을 위해 일부 주석은 더 쉬운 표현으로 재차 다듬음.
 
 ### 결과
 

@@ -1612,6 +1612,60 @@ flowchart LR
 
 ---
 
+## 2026-08-27 — Phase 2 Interaction: 장치 활성화 및 문 열기 상호작용 구현 (SPARK-43)
+
+**Milestone:** Phase 2 — Interaction System  
+**Category:** Gameplay / Interaction / C++ / Blueprint  
+**Status:** Completed  
+**Branch:** feature/interaction  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- `IInteractable` 인터페이스를 상속받은 상호작용 장치 액터(`ASparkSwitch`)와 개폐 가능한 문 액터(`ASparkDoor`) C++ 베이스 클래스 구현
+- 스포이트 툴(`EditInstanceOnly`)을 이용해 레벨 상에서 스위치와 문을 1대1로 직관적으로 연결하는 아키텍처 구축
+- 여닫이문(경첩 피봇 기반 회전) 애니메이션과 일회성/재사용 스위치 로직을 블루프린트(`BP_SparkDoor`, `BP_SparkSwitch`)로 연동하여 인게임 검증
+
+### 작업 내용
+
+1. **`ASparkDoor` C++ 클래스 구현 (`Source/Spark/Interaction/`)**:
+   - 문 상태(`bIsOpen`) 관리 및 `OpenDoor()`, `CloseDoor()`, `ToggleDoor()`, `IsOpen()` 함수 구현.
+   - 블루프린트에서 타임라인 애니메이션을 재생할 수 있도록 `BP_OnDoorOpened`, `BP_OnDoorClosed` 이벤트 제공.
+   - 틱이 불필요하므로 `PrimaryActorTick.bCanEverTick = false` 설정.
+2. **`ASparkSwitch` C++ 클래스 구현 (`Source/Spark/Interaction/`)**:
+   - `IInteractable` 인터페이스를 상속받아 `CanInteract_Implementation`, `Interact_Implementation`, `GetInteractionText_Implementation` 구현.
+   - `TargetDoor` (`TObjectPtr<ASparkDoor>`, `EditInstanceOnly`) 슬롯을 열어 에디터 스포이트로 대상 문을 직접 지정 가능하도록 구성.
+   - `bReusable` 플래그를 통해 일회성 활성화와 토글형 스위치 동작을 모두 지원.
+3. **블루프린트 파생 클래스 제작 (`Content/Spark/Blueprints/Interactions/`)**:
+   - `BP_SparkDoor`: `DoorHinge`(SceneComponent)를 추가해 문 가장자리를 회전축으로 설정하고, `DoorTimeline`과 `Lerp (Rotator)`를 연결해 90도 회전하는 여닫이문 애니메이션 완성.
+   - `BP_SparkSwitch`: `SwitchMesh` 및 콜리전을 구성하고 `BP_OnSwitchActivated` 이벤트에서 시각적 피드백 연동.
+4. **인게임 상호작용 검증**:
+   - 레벨에 배치된 `BP_SparkSwitch`에서 스포이트로 `BP_SparkDoor`를 연결한 뒤, E키 상호작용 시 스위치 활성화와 함께 문이 경첩을 축으로 90도 부드럽게 열림을 확인.
+
+### 결과
+
+- `IInteractable` 인터페이스를 활용한 첫 실제 상호작용 기믹(스위치 및 문) 구현 완료.
+- `SPARK-43 (장치 활성화 및 문 열기 상호작용 구현)` 완료.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| 스포이트 대상 문(TargetDoor) 연결 | Pass | 레벨 에디터에서 노란색 가이드 라인 및 참조 정상 작동 |
+| 스위치 E키 상호작용 시 문 개방 | Pass | Event BP_OnDoorOpened 트리거 및 문 회전 확인 |
+| 일회성 스위치 상태 유지 | Pass | 1회 활성화 후 재사용 차단 및 프롬프트 미노출 정상 확인 |
+| 여닫이문 경첩(Yaw 90도) 회전 | Pass | Hinge 피봇 기준 90도 부드러운 타임라인 회전 확인 |
+
+### 다음 작업
+
+- `SPARK-44`: 케이블 연결 상호작용 구현 (케이블 집기, 들고 이동, 슬롯 꽂기 및 전력 복구)
+
+### 관련 자료
+
+- Related Document: [01_GDD.md](./01_GDD.md), [02_Architecture.md](./02_Architecture.md), [04_Level_Design.md](./04_Level_Design.md)
+
+---
+
 # Daily Log Template
 
 아래 Template을 복사하여 일일 개발 기록에 사용한다.

@@ -1639,8 +1639,9 @@ flowchart LR
 3. **블루프린트 파생 클래스 제작 (`Content/Spark/Blueprints/Interactions/`)**:
    - `BP_SparkDoor`: `DoorHinge`(SceneComponent)를 추가해 문 가장자리를 회전축으로 설정하고, `DoorTimeline`과 `Lerp (Rotator)`를 연결해 90도 회전하는 여닫이문 애니메이션 완성.
    - `BP_SparkSwitch`: `SwitchMesh` 및 콜리전을 구성하고 `BP_OnSwitchActivated` 이벤트에서 시각적 피드백 연동.
-4. **인게임 상호작용 검증**:
+4. **인게임 상호작용 검증 및 충돌 밀어내기 1차 처리**:
    - 레벨에 배치된 `BP_SparkSwitch`에서 스포이트로 `BP_SparkDoor`를 연결한 뒤, E키 상호작용 시 스위치 활성화와 함께 문이 경첩을 축으로 90도 부드럽게 열림을 확인.
+   - 문 회전 중 캐릭터 충돌 시 `On Component Hit` 및 `Launch Character` (Forward Vector * 300, XY/Z Override)를 적용하여 기본 밀어내기 피드백 구성. (키네마틱 회전 문과 캐릭터 캡슐 간의 완벽한 연속 물리 밀어내기는 추후 레벨 폴리싱 및 전용 푸셔 컴포넌트 단계에서 고도화 예정)
 
 ### 결과
 
@@ -1655,6 +1656,7 @@ flowchart LR
 | 스위치 E키 상호작용 시 문 개방 | Pass | Event BP_OnDoorOpened 트리거 및 문 회전 확인 |
 | 일회성 스위치 상태 유지 | Pass | 1회 활성화 후 재사용 차단 및 프롬프트 미노출 정상 확인 |
 | 여닫이문 경첩(Yaw 90도) 회전 | Pass | Hinge 피봇 기준 90도 부드러운 타임라인 회전 확인 |
+| 문 회전 시 기본 충돌 밀어내기 | Pass | Launch Character 기반 1차 넉백 확인 (추후 고도화 항목으로 분류) |
 
 ### 다음 작업
 
@@ -1666,7 +1668,64 @@ flowchart LR
 
 ---
 
+## 2026-08-29 — Phase 2 Interaction: 케이블 연결 상호작용 구현 (SPARK-44)
+
+**Milestone:** Phase 2 — Interaction System  
+**Category:** Gameplay / Interaction / C++ / Blueprint  
+**Status:** Completed  
+**Branch:** feature/interaction  
+**Engine:** Unreal Engine 5.5.4  
+
+### 목표
+
+- 방전된 케이블 플러그를 집고 이동하여 전력 소켓에 꽂으면 전력이 공급되고 대상 장치(문 등)가 작동하는 케이블 연결 상호작용 시스템 구현
+- `IInteractable` 인터페이스를 확장하여 [바닥 플러그 집기 → 플레이어 부착 이동 → 소켓 조준 시 연결 프롬프트 전환 → 소켓 결합 및 전력 복구] 흐름 구축
+- 언리얼 내장 `CableComponent` 모듈을 연동하여 물리적인 케이블 줄 연출 지원
+
+### 작업 내용
+
+1. **`Spark.Build.cs` 모듈 의존성 추가**:
+   - `CableComponent` 모듈을 `PublicDependencyModuleNames`에 추가.
+2. **`ASparkCableSocket` C++ 클래스 구현 (`Source/Spark/Interaction/`)**:
+   - `IInteractable` 인터페이스 상속. 플레이어가 플러그를 들고 소켓을 바라볼 때 `CanInteract`가 true가 되며 `"E 키를 눌러 케이블 연결"` 프롬프트 노출.
+   - `PlugIn()`: 결합 시 `bIsPowered = true` 갱신, `BP_OnPowerRestored()` 트리거 및 연결된 문(`TargetDoor->OpenDoor()`) 개방.
+   - `SocketAttachPoint` (SceneComponent)를 제공하여 플러그가 정확한 단자 위치에 착 스냅되도록 처리.
+3. **`ASparkCablePlug` C++ 클래스 구현 (`Source/Spark/Interaction/`)**:
+   - `IInteractable` 인터페이스 상속. 바닥에 있을 때 `"E 키를 눌러 케이블 집기"` 프롬프트 제공 및 `PickUp(Player)` 호출로 캐릭터 전방 60cm 위치에 부착.
+   - `PlugIntoSocket(Socket)`: 플레이어로부터 Detach 후 소켓의 `SocketAttachPoint`에 스냅 부착하고 소켓의 `PlugIn()` 실행.
+   - `PlugMesh` 및 `UCableComponent` 서브오브젝트 생성.
+4. **블루프린트 파생 클래스 제작 (`Content/Spark/Blueprints/Interactions/`)**:
+   - `BP_SparkCableSocket`: `SocketMesh` 및 콜리전(`BlockAllDynamic`) 구성, `BP_OnPowerRestored` 이벤트 연동.
+   - `BP_SparkCablePlug`: `PlugMesh` 외형 및 `CableComponent` 길이/두께 설정.
+5. **인게임 상호작용 검증**:
+   - 바닥에 놓인 플러그를 E키로 집어 들고 이동 후, 소켓을 바라보고 E키를 눌렀을 때 플러그가 소켓에 스냅되며 문이 정상 개방됨을 확인.
+
+### 결과
+
+- Phase 2 상호작용 시스템의 핵심 퍼즐 기믹인 케이블 연결 시스템 구현 완료.
+- `SPARK-44 (케이블 연결 상호작용 구현)` 완료.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| 바닥 케이블 플러그 집기 | Pass | E키 입력 시 캐릭터 전방에 안정적으로 부착 |
+| 소켓 조준 시 프롬프트 동적 전환 | Pass | 플러그 소지 시 소켓에서 "E 키를 눌러 케이블 연결" 출력 |
+| 소켓 꽂기 및 위치 스냅 | Pass | 소켓 AttachPoint로 위치/회전 자동 정렬 |
+| 전력 복구 시 대상 문 연동 개방 | Pass | TargetDoor->OpenDoor() 정상 호출 확인 |
+
+### 다음 작업
+
+- Phase 2 Interaction 스프린트 완료 및 Phase 3(퍼즐/레벨 또는 캐릭터 고도화) 준비
+
+### 관련 자료
+
+- Related Document: [01_GDD.md](./01_GDD.md), [02_Architecture.md](./02_Architecture.md), [04_Level_Design.md](./04_Level_Design.md)
+
+---
+
 # Daily Log Template
+
 
 아래 Template을 복사하여 일일 개발 기록에 사용한다.
 

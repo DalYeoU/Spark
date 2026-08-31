@@ -18,7 +18,7 @@ void ASparkSwitch::BeginPlay()
 
 bool ASparkSwitch::CanInteract_Implementation(APawn* InstigatorPawn) const
 {
-    // 재사용 가능(토글형) 스위치이면 항상 상호작용 가능
+    // 토글형 스위치이면 항상 상호작용 가능
     if (bReusable)
     {
         return true;
@@ -32,7 +32,7 @@ void ASparkSwitch::Interact_Implementation(APawn* InstigatorPawn)
 {
     if (bReusable)
     {
-        // 토글형: 켜짐/꺼짐 상태 전환
+        // 켜짐/꺼짐 상태 전환
         bIsActivated = !bIsActivated;
         if (bIsActivated)
         {
@@ -53,7 +53,7 @@ void ASparkSwitch::Interact_Implementation(APawn* InstigatorPawn)
     }
     else
     {
-        // 일회성: 아직 켜지지 않은 경우에만 활성화 실행
+        // 아직 켜지지 않은 경우에만 활성화 실행
         if (!bIsActivated)
         {
             bIsActivated = true;

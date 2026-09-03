@@ -73,3 +73,9 @@ flowchart LR
 ## Project Status
 
 🚧 In Development — 기획 문서 확정, 구현 진행 중.
+
+## 대용량 에셋 다운로드
+
+Git LFS를 사용할 수 없어 대용량 에셋은 Google Drive로 관리합니다.
+
+[Google Drive 에셋 폴더](https://drive.google.com/drive/folders/17hMg9nc95p2RM80jxRy6xg5npcK4xQmn?usp=sharing)

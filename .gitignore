@@ -111,12 +111,16 @@ Plugins/**/Intermediate/*
 
 # Unreal Engine 5.4+ Zen Storage VFS Cache
 Data/
+!Source/Spark/Data
 
 # FoxDen 앱의 로컬 설정 파일 폴더
 .foxden/
 
 # TIL용 로그 제외
 Docs/TIL
+
+# 로봇 이미지
+Docs/Robot_Concept_art
 
 ### Custom: LFS 미지원 환경이라 대용량 바이너리는 git 밖에서 관리 ###
 # Content는 클라우드(OneDrive 등)로 별도 백업, git에는 Source/Config/문서만

@@ -1,0 +1,66 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/GameInstanceSubsystem.h"
+#include "SparkSaveSubsystem.generated.h"
+
+class USparkSaveGame;
+
+/**
+ * USparkSaveSubsystem
+ *
+ * 세이브 및 체크포인트 영속성을 관리하는 서브시스템입니다.
+ * GameInstance 수명 주기에 바인딩되어 레벨 전환 및 재시작 시에도 상태를 유지합니다.
+ */
+UCLASS()
+class SPARK_API USparkSaveSubsystem : public UGameInstanceSubsystem
+{
+	GENERATED_BODY()
+
+public:
+	USparkSaveSubsystem();
+
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
+	// 세이브 데이터 디스크 저장 (실패 시 예외 처리 및 에러 로그 출력)
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem")
+	bool SaveGameData(FName InCheckpointId, FName InLevelName, const FTransform& InPlayerTransform);
+
+	// 디스크에서 세이브 데이터 로드 (실패 시 예외 처리 및 에러 로그 출력)
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem")
+	USparkSaveGame* LoadGameData();
+
+	// 저장된 세이브 파일이 존재하고 이어하기가 가능한지 검사
+	UFUNCTION(BlueprintPure, Category = "SaveSystem")
+	bool CanContinue() const;
+
+	// 현재 메모리에 캐시된 세이브 데이터 반환
+	UFUNCTION(BlueprintPure, Category = "SaveSystem")
+	USparkSaveGame* GetCurrentSaveData() const { return CurrentSaveData; }
+
+	// 세이브 슬롯 이름 반환
+	UFUNCTION(BlueprintPure, Category = "SaveSystem")
+	FString GetDefaultSlotName() const { return DefaultSlotName; }
+
+	// 세이브 유저 인덱스 반환
+	UFUNCTION(BlueprintPure, Category = "SaveSystem")
+	int32 GetDefaultUserIndex() const { return DefaultUserIndex; }
+
+	// 캐시된 세이브 데이터 초기화
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem")
+	void ResetCurrentSaveData();
+
+private:
+	// 현재 로드/저장된 세이브 인스턴스 캐시
+	UPROPERTY(Transient)
+	TObjectPtr<USparkSaveGame> CurrentSaveData;
+
+	// 기본 세이브 슬롯 이름
+	UPROPERTY(EditDefaultsOnly, Category = "SaveSystem")
+	FString DefaultSlotName;
+
+	// 기본 유저 인덱스
+	UPROPERTY(EditDefaultsOnly, Category = "SaveSystem")
+	int32 DefaultUserIndex;
+};

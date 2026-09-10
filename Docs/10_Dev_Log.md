@@ -1312,7 +1312,8 @@ flowchart LR
 ### 작업 내용
 
 1. **RenderDoc 연동**: 엔진 내장 `RenderDocPlugin` 활성화, Project Settings에서 `Auto attach on startup` 체크 및 실행 경로 등록. PIE 중 `F12`로 프레임 캡처.
-2. **레벨 내 DirectionalLight 중복 발견 및 제거**: RenderDoc 캡처 화면에 `"Multiple directional lights are competing to be the single one used for forward shading, translucent, water or volumetric fog"` 경고가 표시됨을 확인. 원본 레벨의 `DirectionalLight`(Intensity 0.005, 흰색)가 조명 세팅 스크립트의 `destroy_if_exists("SunLight")` 라벨 불일치로 인해 하루 종일 제거되지 않고 `DimAmbientFill`과 공존하고 있었음. 이 두 라이트가 Forward Shading(Niagara 파티클이 사용하는 반투명 렌더링 경로)에 쓰일 라이트 자리를 두고 밝기 기준으로 경쟁하면서, 같은 설정으로도 매번 다른 라이트가 선택되어 결과가 비결정적으로 보였던 것으로 추정.
+2. **레벨 내 DirectionalLight 중복 발견 및 제거**: RenderDoc 캡처 화면에 `"Multiple directional lights are competing to be the single one used for forward shading, translucent, water or volumetric fog"` 경고가 표시됨을 확인. 원본 레벨의 `DirectionalLight`(Intensity 0.005, 흰색)가 조명 세팅 스크립트의 `destroy_if_exists("SunLight")` 라벨 불일치로 인해 하루 종일 제거되지 않고 `DimAmbientFill`과 공존하고 있었음. 이 두 라이트가 Forward Shading(Niagara 파티클이 사용하는 반투명 렌더링 경로)에 쓰일 라이트 자리를 두고 밝기 기준으로 경쟁하고 있었음을 확인하고 발견 즉시 정리함.
+   - **(2026-09-04 정정)** 당시엔 이 라이트 경쟁이 "같은 설정에서도 매번 다르게 나온다"는 비결정적 증상의 원인이라고 추정했으나, 이후 재검토 결과 이 추정은 근거가 약하다고 판단함. Forward Shading 라이트 선택은 Niagara 파티클의 셰이딩에만 관여하고 스파크 PointLight의 `LightColor` 값과는 무관하며, 두 라이트의 밝기가 프레임마다 바뀌는 것도 아니라서 "같은 설정으로도 매번 다른 결과"라는 진짜 비결정성을 설명하지 못한다. 실제 흰색 클리핑 자체는 톤맵 단계에서 항상 동일하게(즉 결정적으로) 발생하는 현상이었다. 08-18에 관찰된 "특정 시점엔 정상, 이후엔 재현 안 됨" 증상의 진짜 원인은 결국 특정하지 못한 채로 남아있다 (조사를 반복하는 과정에서 Intensity/조명 세팅 값 자체가 매번 조금씩 달랐을 가능성이 높다).
 3. **Pixel History / Shader Debug로 톤매핑 파이프라인 실측**:
    - `PostDOFTranslucency.SceneColor`(톤매핑 직전 HDR 원본) 값이 약 `(148~160, 89~95, 30~32)`로, 의도한 주황(`1.0, 0.6, 0.2`) 비율과 일치함을 확인 — 원본 색상 자체는 항상 정상이었음
    - `EyeAdaptationBuffer`(노출 배율)와 `BloomY`(블룸 기여분)까지 개별 확인
@@ -1327,8 +1328,8 @@ flowchart LR
 ### 문제 및 해결 (Troubleshooting)
 
 - **문제**: 착지 스파크 발광이 흰색으로 클리핑됨
-  - **원인**: (1) 레벨에 DirectionalLight가 중복 존재하여 Forward Shading용 라이트 선택이 비결정적이었음, (2) 6000~30000candela 수준의 PointLight Intensity가 노출/톤맵 조정만으로는 색상을 보존할 수 없을 만큼 극단적으로 컸음(원본 SceneColor는 항상 정상 주황이었으나 톤매핑 이후 클리핑)
-  - **해결**: 중복 라이트 제거 + PostProcessVolume `White Temp`를 강하게 올려 최종 톤을 주황 쪽으로 보정 (근본적인 노출 재설계 대신 실용적 색보정으로 마무리)
+  - **원인**: 6000~30000candela 수준의 PointLight Intensity가 노출/톤맵 조정만으로는 색상을 보존할 수 없을 만큼 극단적으로 컸음(Pixel History로 확인한 `PostDOFTranslucency.SceneColor`는 항상 정상 주황이었으나, 이후 톤매핑 단계에서 흰색으로 클리핑됨). 참고로 같은 시점에 RenderDoc 경고로 발견한 레벨 내 DirectionalLight 중복(Forward Shading에 쓰일 라이트 선택이 비결정적이었던 문제)도 함께 제거했지만, 이는 Niagara 반투명 파티클의 셰이딩 대상 라이트 선택 문제였을 뿐 PointLight 자체의 색상(`LightColor`)과는 별개의 인과 경로였다. 즉 흰색 클리핑의 실질적 원인은 톤맵 단계 하나였고, 중복 라이트 제거는 별도로 발견된 다른 문제를 같이 정리한 것에 가깝다.
+  - **해결**: PostProcessVolume `White Temp`를 강하게 올려 클리핑된 흰색을 주황 쪽으로 보정 (근본적인 노출 파이프라인 재설계 대신 실용적 색보정으로 마무리). 중복 DirectionalLight는 별개로 제거.
 - **문제**: Landing Spark만 다른 이벤트보다 어둡고 좁게 보임
   - **원인**: Landing의 조명/파티클 스폰 오프셋이 바닥에 너무 가까워(1unit) 조명이 바닥 메쉬에 파묻힘
   - **해결**: 파티클과 조명의 스폰 위치를 분리, 조명만 15unit 높이로 띄우고 그림자 캐스팅을 꺼서 캐릭터 자기 그림자 문제도 함께 해결
@@ -1724,6 +1725,115 @@ flowchart LR
 
 ---
 
+## 2026-09-04 — 조명 스크립트의 PostProcessVolume 중복 버그 발견 및 수정
+
+**Milestone:** Phase 1 — Core Prototype
+**Category:** Lighting / Rendering / Bugfix
+**Status:** Completed
+**Branch:** feature/movement
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 뷰포트에 배치된 `PostProcessVolume`의 White Temp가 스크립트로 설정한 25000이 아니라 4000으로 보이는 현상 조사 및 해결
+- 2026-08-19 RenderDoc 조사 당시 "중복 DirectionalLight가 흰색 클리핑의 진짜 원인이었다"는 서술이 부정확했음을 확인하고 Dev Log/TIL Log/블로그 글의 인과관계를 정정
+
+### 작업 내용
+
+1. **White Temp 불일치 원인 조사**:
+   - Outliner를 확인한 결과 레벨에 `PostProcessVolume`(원본 레벨의 기본 볼륨, 라벨 "PostProcessVolume")과 `PPV_BaseLighting`(스크립트가 생성) 두 개가 공존하고 있음을 발견.
+   - `apply_spark_base_lighting.py`의 정리 로직(`destroy_all_of_class`)이 `SkyAtmosphere`/`SkyLight`/`DirectionalLight`만 대상으로 하고 `PostProcessVolume`은 빠뜨리고 있었음을 확인.
+   - 두 `PostProcessVolume`이 모두 Unbound로 겹쳐 있어 우선순위/블렌딩에 따라 값이 섞이거나 원본 볼륨 쪽 값이 최종 반영되면서, 스크립트가 설정한 White Temp 25000 대신 원본 볼륨의 4000이 뷰포트에 노출되고 있었음.
+   - 2026-08-19에 겪었던 "레벨 원본 DirectionalLight가 라벨 불일치로 안 지워져 새 라이트와 공존"했던 버그와 **완전히 동일한 패턴**(원본 액터 미제거 + 신규 액터 공존)임을 확인.
+2. **`apply_spark_base_lighting.py` 수정**:
+   - 클래스 기준 정리 대상에 `unreal.PostProcessVolume`을 추가하여, 실행할 때마다 레벨에 남아있던 기존 PostProcessVolume을 전부 제거하고 `PPV_BaseLighting` 하나만 남도록 수정.
+3. **2026-08-19 인과관계 서술 정정**:
+   - 당시 "중복 DirectionalLight가 흰색 클리핑 버그의 진짜 원인"이라고 서술했던 부분을, 실제로는 (1) 톤맵 클리핑이 흰색 문제의 유일한 원인이고 (2) 중복 DirectionalLight는 RenderDoc 경고 덕분에 같이 발견한 별개의 문제(Niagara 파티클의 Forward Shading 라이트 선택 문제, PointLight `LightColor`와는 무관)였다는 내용으로 `Docs/10_Dev_Log.md`, `Docs/TIL/TIL_Log.md`, 퍼블리시된 블로그 글(`2026-08-19-Spark-RenderDoc-Lighting-Fix.html`) 세 곳 모두 정정.
+   - 추가로, "중복 라이트 경쟁 때문에 같은 설정에서도 매번 다른 결과가 나왔다"는 08-19 당시의 비결정성 설명도 근거가 약함을 확인. Forward Shading 라이트 선택은 PointLight 색상과 무관하고, 톤맵 클리핑 자체는 같은 Intensity 값이면 항상 같은 결과가 나오는 결정적 현상이라 "매번 다르게 보였다"는 증상을 설명하지 못함. 08-18에 관찰됐던 그 비결정성 증상의 진짜 원인은 결국 특정하지 못한 채로 남아있음 (조사를 반복하며 설정값 자체가 매번 조금씩 달랐을 가능성이 유력).
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 스크립트로 White Temp를 25000으로 설정했는데 뷰포트에는 4000으로 표시됨
+  - **원인**: 레벨 원본의 `PostProcessVolume`이 정리 로직에서 빠져 있어 `PPV_BaseLighting`과 공존, 두 볼륨의 값이 섞이거나 원본 값이 우선 적용됨
+  - **해결**: 정리 대상 클래스 목록에 `PostProcessVolume` 추가
+
+### 결과
+
+- `apply_spark_base_lighting.py` 재실행 시 레벨에 `PPV_BaseLighting` 단 하나만 남고, White Temp 25000이 정상적으로 뷰포트에 반영됨을 확인.
+- 2026-08-19 문서 서술의 인과관계 오류를 정정하여, 실제 원인(톤맵 클리핑)과 부수적으로 발견한 별개 버그(중복 라이트)를 명확히 구분함.
+
+### 결정
+
+- 앞으로 "이름이 아니라 클래스 기준으로 기존 액터를 전부 지우고 새로 만드는" 정리 패턴을 조명/후처리 관련 스크립트의 기본 원칙으로 삼는다. 특정 클래스 하나만 빠뜨려도 동일한 유형의 버그(레벨 원본 액터와 신규 액터 공존)가 반복될 수 있음을 확인했기 때문.
+
+### 관련 자료
+
+- Related Document: [05_Art_Direction.md](./05_Art_Direction.md)
+
+---
+
+## 2026-09-11 — Phase 2 Basic Save System (SaveGame 및 트랜스폼/체크포인트 저장 구현)
+
+**Milestone:** Phase 2 — Gameplay Prototype
+**Category:** Save System / Framework
+**Status:** Completed
+**Branch:** feature/save-system
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- `USaveGame` 기반의 `USparkSaveGame` 클래스를 작성하고 체크포인트 ID, 레벨 정보, 플레이어 트랜스폼 데이터 저장/로드 구조 구축 (SPARK-48, SPARK-49)
+- `UGameInstanceSubsystem`을 상속받는 `USparkSaveSubsystem`을 통해 저장/로드 실패 시 안전한 예외 처리 및 `CanContinue` 판별 기능 구현
+- 자동화 테스트(`IMPLEMENT_SIMPLE_AUTOMATION_TEST`)를 통한 세이브/로드 및 예외 처리 검증
+
+### 작업 내용
+
+1. **`USparkSaveGame` 클래스 구현 (`Source/Spark/Save/SparkSaveGame.h`, `.cpp`)**:
+   - `USaveGame` 상속 클래스 생성 및 프로젝트 컨벤션(`Source/Spark/Save/`)에 맞게 폴더 배치.
+   - 직렬화 멤버 변수 정의: `SaveSlotName`, `UserIndex`, `CheckpointId` (`FName`), `LevelName` (`FName`), `PlayerTransform` (`FTransform`).
+   - 기본 생성자에서 `DefaultSlotName`, `NAME_None`, `FTransform::Identity`로 기본값 초기화.
+   - 프로젝트 주석 컨벤션에 맞춰 `//` 주석 적용.
+2. **`USparkSaveSubsystem` 서브시스템 구현 (`Source/Spark/Save/SparkSaveSubsystem.h`, `.cpp`)**:
+   - `UGameInstanceSubsystem` 상속을 통해 레벨 전환 및 재시작 시에도 메모리 내 세이브 캐시 보존.
+   - `SaveGameData`: 체크포인트 ID, 레벨 이름, 플레이어 트랜스폼을 세이브 슬롯에 저장하고, 저장 실패 시 에러 로그 출력 및 false 반환.
+   - `LoadGameData`: 슬롯 존재 여부, 파일 무결성, 객체 타입 검증 후 유효 객체 반환. 부재 또는 손상 시 크래시 없이 nullptr 반환 및 로그 처리.
+   - `CanContinue`: 디스크 내 세이브 파일 유무 및 유효 데이터(레벨/체크포인트 식별자) 기록 여부를 검사하여 이어하기 가능 여부 판별.
+3. **세이브 시스템 직렬화 및 예외 처리 검증**:
+   - `USparkSaveGame` 데이터 세팅 -> 디스크 저장(`SaveGameToSlot`) -> 존재 확인(`DoesSaveGameExist`) -> 역직렬화 로드(`LoadGameFromSlot`) -> 데이터 일치성(ID, 레벨명, 위치, 회전) 검증 -> 미존재 슬롯 예외 처리 검증 완료 (동작 검증 후 테스트 파일은 코드베이스 경량화를 위해 정리).
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: IDE(Visual Studio)에서 일반 솔루션 빌드 시 `UnrealEditor-Spark-0003.dll` 접근 거부(LNK1104, 코드 6) 에러 발생
+  - **확인된 사실**: 에디터(`UnrealEditor.exe`)가 켜져 있는 상태에서 IDE에서 전체 빌드를 시도했을 때, 에디터 프로세스가 기존 DLL 파일을 점유(Lock)하고 있어 쓰기 권한 충돌이 발생함.
+  - **원인 (확정)**: 언리얼 에디터 실행 중 IDE 일반 빌드 시도의 DLL 파일 락 현상.
+  - **해결**: 에디터 내부의 Live Coding(`Ctrl + Alt + F11`)을 사용하여 에디터를 닫지 않고 정상적으로 핫 리로드 컴파일 완료.
+
+### 결과
+
+- `SPARK-48 (SaveGame 클래스 및 Checkpoint ID/Level 정보 저장 구현)` 완료.
+- `SPARK-49 (Player Transform 저장 및 Save/Load 실패 처리 구현)` 완료.
+- Session Frontend의 Automation Test에서 `Spark.SaveSystem.SaveAndLoad` 테스트 0 Fails (0.013s)로 정상 통과 확인.
+
+### 테스트
+
+| 테스트 항목 | 결과 | 비고 |
+|------------|------|------|
+| USparkSaveGame 인스턴스 생성 및 프로퍼티 초기화 | Pass | 기본값 정상 할당 |
+| SaveGameToSlot 디스크 직렬화 저장 | Pass | 파일 생성 및 DoesSaveGameExist true 확인 |
+| LoadGameFromSlot 역직렬화 데이터 일치성 | Pass | Checkpoint ID, Level, Location, Rotation 일치 |
+| 미존재 슬롯 로드 시 예외 처리 | Pass | 크래시 없이 nullptr 반환 및 안전 처리 |
+| 테스트 슬롯 파일 정리(DeleteGameInSlot) | Pass | 테스트 후 잔여 파일 정리 확인 |
+
+### 다음 작업
+
+- `SPARK-45 Checkpoint 등록 및 마지막 위치 저장 구현` (체크포인트 액터 배치 및 통과 시 세이브 연동)
+
+### 관련 자료
+
+- Related Document: [02_Architecture.md](./02_Architecture.md), [07_Coding_Convention.md](./07_Coding_Convention.md), [08_Roadmap.md](./08_Roadmap.md)
+
+---
+
 # Daily Log Template
 
 
@@ -1747,23 +1857,18 @@ flowchart LR
 
 -
 
-### 문제
+### 문제 및 해결 (Troubleshooting)
 
--
+<!--
+"확인된 사실"과 "원인"을 반드시 구분해서 적을 것 (2026-09-04 사건 참고: Docs/12_AI_Documentation_Case_Study.md).
+확인된 사실 = 실측/코드로 직접 검증한 것만. 원인 = 확정 / 추정 / 미해결 중 하나를 명시하고, 추정이면 근거의 한계도 같이 적는다.
+나중에 이 결론이 틀린 것으로 밝혀지면 원본을 지우지 말고 "(YYYY-MM-DD 정정)"을 이어서 덧붙인다.
+-->
 
-### 원인
-
--
-
-### 시도한 방법
-
-1.
-2.
-3.
-
-### 해결
-
--
+- **문제**: <증상>
+  - **확인된 사실**: <실측/코드로 직접 검증한 것만>
+  - **원인 (확정 / 추정 / 미해결 중 택 1)**: <원인 서술 + 확신 근거>
+  - **해결**: <실제로 적용한 조치>
 
 ### 결과
 

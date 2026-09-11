@@ -49,8 +49,13 @@ public:
     // 낙사 또는 HazardZone 오버랩시 엔진에서 호출되는 사망/실패 처리 오버라이드 함수
     virtual void FellOutOfWorld(const class UDamageType& DamageType) override;
     
-    // 빠른 리스폰 처리 (스폰 위치 또는 최신 체크포인트 위치로 이동)
+    // 빠른 리스폰 처리 (세이브 시스템의 최신 체크포인트 위치로 이동)
+    UFUNCTION(BlueprintCallable, Category = "Respawn")
     void RespawnAtLastCheckpoint();
+
+    // 레벨을 재시작하고 마지막 체크포인트에서 시작하도록 처리
+    UFUNCTION(BlueprintCallable, Category = "Respawn")
+    void RestartLevelFromCheckpoint();
 
 protected:
     // 캐릭터 초기화 및 게임플레이 시작 처리

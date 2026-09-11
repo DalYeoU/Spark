@@ -51,7 +51,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem")
 	void ResetCurrentSaveData();
 
+	// 다음 레벨 로드 시 체크포인트 위치로 복원해야 하는지 여부 확인
+	UFUNCTION(BlueprintPure, Category = "SaveSystem")
+	bool ShouldRestoreFromCheckpoint() const { return bShouldRestoreFromCheckpoint; }
+
+	// 체크포인트 복원 플래그 설정 (재시작 또는 이어하기 전 활성화)
+	UFUNCTION(BlueprintCallable, Category = "SaveSystem")
+	void SetShouldRestoreFromCheckpoint(bool bEnable) { bShouldRestoreFromCheckpoint = bEnable; }
+
 private:
+	// 레벨 재시작 시 플레이어 위치 복원 트리거 플래그
+	UPROPERTY(Transient)
+	bool bShouldRestoreFromCheckpoint;
 	// 현재 로드/저장된 세이브 인스턴스 캐시
 	UPROPERTY(Transient)
 	TObjectPtr<USparkSaveGame> CurrentSaveData;

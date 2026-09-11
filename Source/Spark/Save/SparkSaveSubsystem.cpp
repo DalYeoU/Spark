@@ -7,6 +7,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogSparkSave, Log, All);
 USparkSaveSubsystem::USparkSaveSubsystem()
 	: DefaultSlotName(TEXT("SparkDefaultSaveSlot"))
 	, DefaultUserIndex(0)
+	, bShouldRestoreFromCheckpoint(false)
 {
 }
 
@@ -19,6 +20,7 @@ void USparkSaveSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void USparkSaveSubsystem::Deinitialize()
 {
 	CurrentSaveData = nullptr;
+	bShouldRestoreFromCheckpoint = false;
 	Super::Deinitialize();
 }
 

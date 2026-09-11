@@ -1772,10 +1772,10 @@ flowchart LR
 
 ---
 
-## 2026-09-11 — Phase 2 Basic Save System (SaveGame 및 트랜스폼/체크포인트 저장 구현)
+## 2026-09-11 — Phase 2 Checkpoint & Save System 구현 (SPARK-45 - SPARK-49)
 
 **Milestone:** Phase 2 — Gameplay Prototype
-**Category:** Save System / Framework
+**Category:** Save System / Checkpoint / Gameplay
 **Status:** Completed
 **Branch:** feature/save-system
 **Engine:** Unreal Engine 5.5.4
@@ -1783,8 +1783,10 @@ flowchart LR
 ### 목표
 
 - `USaveGame` 기반의 `USparkSaveGame` 클래스를 작성하고 체크포인트 ID, 레벨 정보, 플레이어 트랜스폼 데이터 저장/로드 구조 구축 (SPARK-48, SPARK-49)
-- `UGameInstanceSubsystem`을 상속받는 `USparkSaveSubsystem`을 통해 저장/로드 실패 시 안전한 예외 처리 및 `CanContinue` 판별 기능 구현
-- 자동화 테스트(`IMPLEMENT_SIMPLE_AUTOMATION_TEST`)를 통한 세이브/로드 및 예외 처리 검증
+- `UGameInstanceSubsystem`을 상속받는 `USparkSaveSubsystem`을 통해 저장/로드 실패 시 안전한 예외 처리 및 `CanContinue` 판별 기능 구현 (SPARK-48, SPARK-49)
+- `ASparkCheckpoint` 액터 구현을 통한 오버랩 시 체크포인트 등록 및 세이브 연동 (SPARK-45)
+- 사망/낙하 실패 시 마지막 체크포인트 위치 복원 및 레벨 재시작 처리 구현 (SPARK-46)
+- 체크포인트 통과 시 다이제틱 시각 피드백(조명 점등) 및 나이아가라/사운드/BP 이벤트 연출 지원 (SPARK-47)
 
 ### 작업 내용
 
@@ -1798,35 +1800,54 @@ flowchart LR
    - `SaveGameData`: 체크포인트 ID, 레벨 이름, 플레이어 트랜스폼을 세이브 슬롯에 저장하고, 저장 실패 시 에러 로그 출력 및 false 반환.
    - `LoadGameData`: 슬롯 존재 여부, 파일 무결성, 객체 타입 검증 후 유효 객체 반환. 부재 또는 손상 시 크래시 없이 nullptr 반환 및 로그 처리.
    - `CanContinue`: 디스크 내 세이브 파일 유무 및 유효 데이터(레벨/체크포인트 식별자) 기록 여부를 검사하여 이어하기 가능 여부 판별.
-3. **세이브 시스템 직렬화 및 예외 처리 검증**:
-   - `USparkSaveGame` 데이터 세팅 -> 디스크 저장(`SaveGameToSlot`) -> 존재 확인(`DoesSaveGameExist`) -> 역직렬화 로드(`LoadGameFromSlot`) -> 데이터 일치성(ID, 레벨명, 위치, 회전) 검증 -> 미존재 슬롯 예외 처리 검증 완료 (동작 검증 후 테스트 파일은 코드베이스 경량화를 위해 정리).
+   - `bShouldRestoreFromCheckpoint`: 레벨 재시작 시에만 위치 복원이 일어나도록 제어하는 런타임 플래그 및 게터/세터 추가.
+3. **`ASparkCheckpoint` 액터 구현 (`Source/Spark/Checkpoint/SparkCheckpoint.h`, `.cpp`)**:
+   - `SceneRoot`, `TriggerBox` (`UBoxComponent`), `RespawnPoint` (`USceneComponent`) 계층 구성.
+   - 플레이어 제어 폰(`IsPlayerControlled`) 오버랩 시 `USparkSaveSubsystem::SaveGameData`를 호출하여 현재 레벨명, `CheckpointId`, `RespawnPoint` 트랜스폼을 디스크에 자동 저장 (SPARK-45).
+   - 중복 활성화 방지(`bIsActivated`) 처리.
+4. **체크포인트 복원 및 레벨 재시작 연동 (`Source/Spark/Character/SparkCharacter.h`, `.cpp`)**:
+   - `RespawnAtLastCheckpoint()`: 낙하/사망 시 세이브 서브시스템의 마지막 체크포인트 트랜스폼으로 즉시 텔레포트 복원 (SPARK-46).
+   - `RestartLevelFromCheckpoint()` 및 `BeginPlay()`: `bShouldRestoreFromCheckpoint` 플래그를 통해 PlayerStart 일반 시작과 체크포인트 재시작을 명확히 분리하여 복원.
+   - `SparkCharacter.cpp` 내부의 중첩 if문을 Early Return 가드 절로 평탄화하여 가독성 개선.
+5. **체크포인트 피드백 연출 구현 (SPARK-47)**:
+   - `ActiveLight` (`UPointLightComponent`): 통과 순간 Spark 시그니처 주황빛(3,000cd) 점등으로 다이제틱 상태 표시 (영구 점등을 통해 활성화 완료 상태 인디케이터 역할 수행).
+   - `ActivationEffect` (`UNiagaraSystem`), `ActivationSound` (`USoundBase`) 에셋 연동 및 `BP_OnCheckpointActivated()` 이벤트 제공.
+6. **블루프린트 에셋 제작 (`Content/Spark/Blueprints/Interactions/`)**:
+   - `BP_SparkCheckpoint` 생성 및 레벨 배치, 인게임 오버랩/세이브/복원 테스트 완료.
 
 ### 문제 및 해결 (Troubleshooting)
 
-- **문제**: IDE(Visual Studio)에서 일반 솔루션 빌드 시 `UnrealEditor-Spark-0003.dll` 접근 거부(LNK1104, 코드 6) 에러 발생
+- **문제 1**: IDE(Visual Studio)에서 일반 솔루션 빌드 시 `UnrealEditor-Spark-0003.dll` 접근 거부(LNK1104, 코드 6) 에러 발생
   - **확인된 사실**: 에디터(`UnrealEditor.exe`)가 켜져 있는 상태에서 IDE에서 전체 빌드를 시도했을 때, 에디터 프로세스가 기존 DLL 파일을 점유(Lock)하고 있어 쓰기 권한 충돌이 발생함.
   - **원인 (확정)**: 언리얼 에디터 실행 중 IDE 일반 빌드 시도의 DLL 파일 락 현상.
   - **해결**: 에디터 내부의 Live Coding(`Ctrl + Alt + F11`)을 사용하여 에디터를 닫지 않고 정상적으로 핫 리로드 컴파일 완료.
+- **문제 2**: 에디터 플레이(PIE) 시작 시 이전 세이브가 자동 로드되어 플레이어가 시작 지점이 아닌 마지막 체크포인트 위치에서 시작하는 현상
+  - **확인된 사실**: `ASparkCharacter::BeginPlay()`에서 세이브 파일 존재 여부만 보고 무조건 `TeleportTo`를 호출하여 신규 시작과 재시작을 구분하지 못함.
+  - **원인 (확정)**: 시작 모드(새 게임 vs 레벨 재시작/이어하기) 구분을 위한 런타임 플래그의 부재.
+  - **해결**: `USparkSaveSubsystem`에 `bShouldRestoreFromCheckpoint` 런타임 플래그를 도입하여, 레벨 재시작/이어하기 시에만 플래그를 켜고 1회 복원 후 즉시 리셋하도록 수정.
 
 ### 결과
 
+- `SPARK-45 (Checkpoint 등록 및 마지막 위치 저장 구현)` 완료.
+- `SPARK-46 (실패 후 Checkpoint 복원 및 레벨 재시작 처리 구현)` 완료.
+- `SPARK-47 (Checkpoint Feedback 구현)` 완료.
 - `SPARK-48 (SaveGame 클래스 및 Checkpoint ID/Level 정보 저장 구현)` 완료.
 - `SPARK-49 (Player Transform 저장 및 Save/Load 실패 처리 구현)` 완료.
-- Session Frontend의 Automation Test에서 `Spark.SaveSystem.SaveAndLoad` 테스트 0 Fails (0.013s)로 정상 통과 확인.
+- Phase 2 Checkpoint & Save System 마일스톤 전체 완료.
 
 ### 테스트
 
 | 테스트 항목 | 결과 | 비고 |
 |------------|------|------|
-| USparkSaveGame 인스턴스 생성 및 프로퍼티 초기화 | Pass | 기본값 정상 할당 |
-| SaveGameToSlot 디스크 직렬화 저장 | Pass | 파일 생성 및 DoesSaveGameExist true 확인 |
-| LoadGameFromSlot 역직렬화 데이터 일치성 | Pass | Checkpoint ID, Level, Location, Rotation 일치 |
-| 미존재 슬롯 로드 시 예외 처리 | Pass | 크래시 없이 nullptr 반환 및 안전 처리 |
-| 테스트 슬롯 파일 정리(DeleteGameInSlot) | Pass | 테스트 후 잔여 파일 정리 확인 |
+| USparkSaveGame 직렬화 및 예외 처리 | Pass | 자동화 테스트 검증 완료 |
+| 체크포인트 오버랩 시 디스크 자동 저장 | Pass | LogSparkSave: SaveGameData 성공 로그 확인 |
+| 게임 시작 시 정상 위치(PlayerStart) 스폰 | Pass | bShouldRestoreFromCheckpoint 플래그 분리로 정상 시작 |
+| 낙하/사망 시 마지막 체크포인트 위치 복원 | Pass | FellOutOfWorld 발생 시 RespawnPoint로 즉시 텔레포트 |
+| 체크포인트 통과 시 피드백 점등 | Pass | ActiveLight(3,000cd) 정상 점등 확인 |
 
 ### 다음 작업
 
-- `SPARK-45 Checkpoint 등록 및 마지막 위치 저장 구현` (체크포인트 액터 배치 및 통과 시 세이브 연동)
+- Phase 2 Puzzle Prototype 구현 (Surface 인식 퍼즐, 케이블 퍼즐 등)
 
 ### 관련 자료
 

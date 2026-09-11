@@ -10,6 +10,9 @@
 
 #include "Components/SparkComponent.h"
 #include "Components/SparkInteractionComponent.h"
+#include "Save/SparkSaveSubsystem.h"
+#include "Save/SparkSaveGame.h"
+#include "Kismet/GameplayStatics.h"
 
 ASparkCharacter::ASparkCharacter()
 {
@@ -61,8 +64,32 @@ void ASparkCharacter::BeginPlay()
 {
     Super::BeginPlay();
     
-    // 시작 시점의 위치를 초기 리스폰 위치로 기억
+    // 시작 시점의 위치를 초기 리스폰 기본값으로 기억
     RespawnLocation = GetActorLocation();
+
+    // 체크포인트 복원 플래그가 켜져 있을 때만 위치 복원 (레벨 재시작 또는 이어하기 시)
+    UGameInstance* GameInstance = GetGameInstance();
+    if (!GameInstance) return;
+
+    USparkSaveSubsystem* SaveSubsystem = GameInstance->GetSubsystem<USparkSaveSubsystem>();
+    if (!SaveSubsystem || !SaveSubsystem->ShouldRestoreFromCheckpoint()) return;
+
+    // 복원 1회 처리 후 플래그 초기화 (다음 일반 시작 시 영향 방지)
+    SaveSubsystem->SetShouldRestoreFromCheckpoint(false);
+
+    USparkSaveGame* SaveData = SaveSubsystem->GetCurrentSaveData();
+    if (!SaveData)
+    {
+        SaveData = SaveSubsystem->LoadGameData();
+    }
+    if (!SaveData || SaveData->CheckpointId.IsNone()) return;
+
+    const FName CurrentLevelName = *UGameplayStatics::GetCurrentLevelName(this, true);
+    if (SaveData->LevelName != CurrentLevelName) return;
+
+    const FTransform& SavedTransform = SaveData->PlayerTransform;
+    TeleportTo(SavedTransform.GetLocation(), SavedTransform.Rotator());
+    RespawnLocation = SavedTransform.GetLocation();
 }
 
 void ASparkCharacter::Tick(float DeltaTime)
@@ -353,14 +380,46 @@ void ASparkCharacter::RespawnAtLastCheckpoint()
     GetCharacterMovement()->StopActiveMovement();
     GetCharacterMovement()->Velocity = FVector::ZeroVector;
 
-    SetActorLocation(RespawnLocation);
+    // 세이브 서브시스템에서 마지막 체크포인트 위치 조회
+    USparkSaveSubsystem* SaveSubsystem = GetGameInstance() ? GetGameInstance()->GetSubsystem<USparkSaveSubsystem>() : nullptr;
+    USparkSaveGame* SaveData = SaveSubsystem ? SaveSubsystem->GetCurrentSaveData() : nullptr;
+    if (SaveSubsystem && !SaveData)
+    {
+        SaveData = SaveSubsystem->LoadGameData();
+    }
+
+    // 체크포인트가 있으면 복원, 없으면 초기 위치로 이동
+    if (SaveData && !SaveData->CheckpointId.IsNone())
+    {
+        TeleportTo(SaveData->PlayerTransform.GetLocation(), SaveData->PlayerTransform.Rotator());
+    }
+    else
+    {
+        SetActorLocation(RespawnLocation);
+    }
 
     // 텔레포트 자체는 즉시 처리하고, 화면만 검은색에서 서서히 밝아지게 해서 순간 이동의 위화감을 가림
+    APlayerController* PlayerController = Cast<APlayerController>(GetController());
+    if (PlayerController && PlayerController->PlayerCameraManager)
+    {
+        PlayerController->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, RespawnFadeInDuration, FLinearColor::Black, false, true);
+    }
+}
+
+void ASparkCharacter::RestartLevelFromCheckpoint()
+{
+    // 레벨 재시작 후 BeginPlay에서 체크포인트 위치로 복원되도록 플래그 활성화
+    UGameInstance* GameInstance = GetGameInstance();
+    if (GameInstance)
+    {
+        if (USparkSaveSubsystem* SaveSubsystem = GameInstance->GetSubsystem<USparkSaveSubsystem>())
+        {
+            SaveSubsystem->SetShouldRestoreFromCheckpoint(true);
+        }
+    }
+
     if (APlayerController* PlayerController = Cast<APlayerController>(GetController()))
     {
-        if (APlayerCameraManager* CameraManager = PlayerController->PlayerCameraManager)
-        {
-            CameraManager->StartCameraFade(1.0f, 0.0f, RespawnFadeInDuration, FLinearColor::Black, false, true);
-        }
+        PlayerController->RestartLevel();
     }
 }

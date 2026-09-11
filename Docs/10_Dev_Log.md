@@ -1845,6 +1845,13 @@ flowchart LR
 | 낙하/사망 시 마지막 체크포인트 위치 복원 | Pass | FellOutOfWorld 발생 시 RespawnPoint로 즉시 텔레포트 |
 | 체크포인트 통과 시 피드백 점등 | Pass | ActiveLight(3,000cd) 정상 점등 확인 |
 
+### 결정 및 설계 검토 (Architecture Decision)
+
+- **게임 재실행 시 체크포인트 자동 복원 유예 및 향후 메인 메뉴 연동 결정**:
+  - 현재 Phase 2 프로토타입 단계는 메인 메뉴 UI 없이 곧바로 게임플레이 레벨로 진입하므로, 에디터 실행 시마다 이전 체크포인트로 강제 소환되는 대신 `PlayerStart`에서 시작해야 레벨 테스트가 원활함을 확인.
+  - 따라서 게임을 완전히 재실행할 때는 `bShouldRestoreFromCheckpoint = false` 기본값에 따라 정상 시작 지점에서 시작하고, 인게임 낙하/사망 시에만 마지막 체크포인트로 즉시 복원되도록 처리함.
+  - 게임 종료 후 이어하기(Continue) 기능은 백엔드 코어(`CanContinue`, `LoadGameData`, `SetShouldRestoreFromCheckpoint`)가 이미 완비되어 있으므로, 향후 Phase 3 또는 UI 스프린트에서 타이틀/메인 메뉴의 `[이어하기]` 버튼 이벤트에 연결하기로 결정.
+
 ### 다음 작업
 
 - Phase 2 Puzzle Prototype 구현 (Surface 인식 퍼즐, 케이블 퍼즐 등)

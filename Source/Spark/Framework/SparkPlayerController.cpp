@@ -61,6 +61,16 @@ void ASparkPlayerController::OnPossess(APawn* InPawn)
             {
                 EnhancedInputComponent->BindAction(InteractAction, ETriggerEvent::Started, SparkCharacter, &ASparkCharacter::Interact);
             }
+            if (SprintAction)
+            {
+                EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, SparkCharacter, &ASparkCharacter::StartSprint);
+                EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, SparkCharacter, &ASparkCharacter::StopSprint);
+            }
+            if (SlideAction)
+            {
+                EnhancedInputComponent->BindAction(SlideAction, ETriggerEvent::Started, SparkCharacter, &ASparkCharacter::StartSlide);
+                EnhancedInputComponent->BindAction(SlideAction, ETriggerEvent::Completed, SparkCharacter, &ASparkCharacter::OnSlideKeyReleased);
+            }
         }
     }
 }

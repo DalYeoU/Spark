@@ -53,6 +53,14 @@ public:
      */
     UFUNCTION(BlueprintCallable, Category = "Spark|Events")
     void TriggerWallJumpSpark(const FHitResult& HitResult);
+
+    // 슬라이딩 마찰 Spark 연출 트리거
+    UFUNCTION(BlueprintCallable, Category = "Spark|Events")
+    void TriggerSlideSpark(const FHitResult& HitResult);
+
+    // 달리기 Spark 연출 트리거
+    UFUNCTION(BlueprintCallable, Category = "Spark|Events")
+    void TriggerSprintSpark(const FHitResult& HitResult);
     
 protected:
 	virtual void BeginPlay() override;

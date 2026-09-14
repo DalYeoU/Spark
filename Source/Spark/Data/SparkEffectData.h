@@ -73,6 +73,14 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Events")
     FSparkEffectData WallJumpData;
 
+    // 슬라이딩(Slide) 마찰 Spark 데이터
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Events")
+    FSparkEffectData SlideData;
+
+    // 달리기(Sprint) 발자국 Spark 데이터
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Events")
+    FSparkEffectData SprintData;
+
     // 케이블(Cable Interaction) Spark 데이터
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Spark|Events")
     FSparkEffectData CableData;

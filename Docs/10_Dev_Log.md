@@ -1329,6 +1329,7 @@ flowchart LR
 
 - **문제**: 착지 스파크 발광이 흰색으로 클리핑됨
   - **원인**: 6000~30000candela 수준의 PointLight Intensity가 노출/톤맵 조정만으로는 색상을 보존할 수 없을 만큼 극단적으로 컸음(Pixel History로 확인한 `PostDOFTranslucency.SceneColor`는 항상 정상 주황이었으나, 이후 톤매핑 단계에서 흰색으로 클리핑됨). 참고로 같은 시점에 RenderDoc 경고로 발견한 레벨 내 DirectionalLight 중복(Forward Shading에 쓰일 라이트 선택이 비결정적이었던 문제)도 함께 제거했지만, 이는 Niagara 반투명 파티클의 셰이딩 대상 라이트 선택 문제였을 뿐 PointLight 자체의 색상(`LightColor`)과는 별개의 인과 경로였다. 즉 흰색 클리핑의 실질적 원인은 톤맵 단계 하나였고, 중복 라이트 제거는 별도로 발견된 다른 문제를 같이 정리한 것에 가깝다.
+    - **(2026-09-12 정정)** 08-18 조사 당시 PointLight Intensity를 6000/15000뿐 아니라 10까지 낮춰서도 테스트했으나 흰색 클리핑이 그대로 재현됐다(당시 대화 기록에만 남아있고 이 문서에는 누락되어 있었음). Intensity=10은 톤맵 클리핑이 물리적으로 일어날 수 없는 값이라, "Intensity가 커서 클리핑됐다"는 원인 설명만으로는 이 결과를 설명하지 못한다. 즉 흰색 클리핑의 원인이 톤맵 단계 하나로 완전히 확정됐다고 보기 어렵고, 08-18의 비결정성 증상과 마찬가지로 미해결로 남겨야 한다.
   - **해결**: PostProcessVolume `White Temp`를 강하게 올려 클리핑된 흰색을 주황 쪽으로 보정 (근본적인 노출 파이프라인 재설계 대신 실용적 색보정으로 마무리). 중복 DirectionalLight는 별개로 제거.
 - **문제**: Landing Spark만 다른 이벤트보다 어둡고 좁게 보임
   - **원인**: Landing의 조명/파티클 스폰 오프셋이 바닥에 너무 가까워(1unit) 조명이 바닥 메쉬에 파묻힘
@@ -1859,6 +1860,95 @@ flowchart LR
 ### 관련 자료
 
 - Related Document: [02_Architecture.md](./02_Architecture.md), [07_Coding_Convention.md](./07_Coding_Convention.md), [08_Roadmap.md](./08_Roadmap.md)
+
+---
+
+## 2026-09-12 — 착지 Spark 흰색 클리핑 버그의 실제 원인 재확정 (PostProcessVolume 중복)
+
+**Category:** Lighting / Debugging
+
+### 목표
+
+- 09-04에 "미해결"로 남겨뒀던 08-19 흰색 클리핑 원인을, 튜터 피드백을 계기로 다시 검증
+
+### 작업 내용
+
+1. **세션 기록 재검토**: 08-19 문서에는 없지만 08-18 대화 세션에는 "PointLight Intensity를 6000/15000/10 전부 테스트했지만 흰색이 그대로 재현됐다"는 기록이 남아있음을 확인. Intensity=10은 톤맵 클리핑이 물리적으로 불가능한 값이라, "Intensity가 커서 클리핑됐다"는 08-19의 원인 설명 자체가 근거 부족이었음을 재확인 (`Docs/10_Dev_Log.md`, `Docs/TIL/TIL_Log.md`에 각각 2026-09-12 정정 추가).
+2. **PPV 중복 수정 이후 조건에서 재테스트**: 09-04에 PostProcessVolume 중복을 수정한 뒤로는 한 번도 원래 증상(높은 Intensity에서 흰색 클리핑)을 재현 테스트한 적이 없었다는 점을 인지하고, 실제 뷰포트에서 단계적으로 재현 시도.
+   - Intensity=10, White Temp=6500(중립): 바닥이 흐릿한 흰빛으로 보였으나, 이는 `DimAmbientFill`(청회색 환경광)과 매우 약한 주황빛이 가산 혼합되며 탁해진 것으로 판단(클리핑과는 다른 현상).
+   - Intensity=1000, White Temp=6500: 선명한 주황 정상 확인.
+   - Intensity=6000(08-18 당시 클리핑이 재현되던 값), White Temp=6500: **클리핑 없이 정상 주황 확인.** Outliner에서 `PostProcessVolume`이 `PPV_BaseLighting` 1개만 존재함을 재확인.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 08-18~08-19 당시 "동일한 Intensity/조명 설정으로도 흰색 클리핑이 재현된다"는 현상의 원인을 끝내 특정하지 못함
+  - **확인된 사실**: 같은 Intensity(6000) 값이 PPV 중복이 있던 08-18~09-04 사이에는 흰색으로 재현됐고, PPV 중복 제거 후인 09-12에는 재현되지 않음. 이 차이 외에 조건 변경은 없었음
+  - **원인 (확정)**: PostProcessVolume 중복으로 인한 두 볼륨의 설정 블렌딩(우선순위/블렌드 웨이트에 따라 Auto Exposure 등 노출 관련 값이 의도와 다르게 섞임)이 흰색 클리핑의 실제 원인이었다. 조사 시점마다 블렌딩 결과가 조금씩 달랐을 가능성이 08-18의 비결정성 증상도 설명한다. 톤맵 클리핑 및 중복 DirectionalLight는 둘 다 원인이 아니었다
+  - **해결**: 이미 09-04에 적용된 `destroy_all_of_class(unreal.PostProcessVolume)` 수정이 사실상의 해결책이었음을 사후 확인. White Temp 보정(8000)은 더 이상 필요하지 않을 가능성이 높아 6500(중립값)으로 되돌리고 재검증 예정
+
+### 결과
+
+- 두 달 가까이 미해결로 남아있던 흰색 클리핑 버그의 실제 원인이 PostProcessVolume 중복이었음을 확정. 톤맵 클리핑 가설과 중복 DirectionalLight 가설은 모두 기각
+- 08-18/08-19/09-04에 걸쳐 세 번 정정됐던 이 버그의 인과관계 서술이 이번에 최종 확정됨
+
+### 결정
+
+- White Temp 보정값을 6500(중립)으로 되돌리고, `apply_spark_base_lighting.py`의 관련 주석을 최종 원인 기준으로 업데이트한다
+
+### 관련 자료
+
+- Related Document: [12_AI_Documentation_Case_Study.md](./12_AI_Documentation_Case_Study.md) (이 정정 과정 자체가 해당 문서의 사례 연구 대상)
+
+---
+
+## 2026-09-14 — Phase 2 Gameplay Prototype: 슬라이딩/대시 지면 마찰 스파크 시스템 구현 및 프로토타입 메커니즘 통합
+
+**Milestone:** Phase 2 — Gameplay Prototype  
+**Category:** Gameplay / Character / Movement / Spark  
+**Status:** Completed  
+**Branch:** feature/movement-spark  
+**Issues:** SPARK-50, SPARK-51, SPARK-52  
+
+### 목표
+
+- 점프 후 착지에만 의존하던 기존 스파크 발생 방식을 개선하여, 수평 이동 액션(달리기/슬라이딩) 중 지면 마찰을 통해 자연스럽게 시야를 확보하는 마찰 스파크 시스템 구축
+- 달리기(Sprint) 상태 및 달리는 도중에만 1회 탭으로 발동되는 지면 슬라이딩(Slide) 메커니즘 구현
+- 지면 재질(PhysicalMaterial)에 따른 스파크 반응(Metal 발생 vs Rubber 차단) 규칙 유지
+- 기존 구현된 Cable 상호작용(SPARK-51) 및 복합 이동 액션 연계(SPARK-52) 기믹과의 통합 검증 완료 처리
+
+### 작업 내용
+
+1. **`USparkEffectDataAsset` 및 `USparkComponent` 확장**:
+   - `FSparkEffectData SlideData`, `FSparkEffectData SprintData` 연출 파라미터 구조체 추가
+   - 지면 슬라이딩 마찰 전용 `TriggerSlideSpark(HitResult)` 및 달리기 발자국 전용 `TriggerSprintSpark(HitResult)` 구현
+   - `ApplySurfaceOverride()`를 통해 지면이 Rubber 재질일 경우 스파크 및 빛이 자동으로 차단되는 물리 머티리얼 반응 유지
+2. **`ASparkCharacter` 달리기(Sprint) 및 슬라이딩(Slide) 구현**:
+   - `StartSprint()`, `StopSprint()`: 기본 걷기 속도(`600.0f`)에서 달리기 속도(`950.0f`)로 전환
+   - `CanSlide()` 조건 검사: 지면 착지 상태 + 달리기 중 + 최소 속도(`500.0f`) 이상일 때만 진입 허용
+   - `StartSlide()`: 
+     - 캡슐 컴포넌트 절반 높이 축소(`SlideCapsuleHalfHeight = 44.0f`, 바닥 충격 방지 `bSnapToGround = false`)
+     - 브레이킹 감속 해제(`BrakingDecelerationWalking = 0.0f`), 무마찰 활주(`GroundFriction = 0.0f`)
+     - 달리기 대비 1.3배의 전방 슬라이드 속도(`SlideImpulse = 1235.0f`) 부여
+     - `bSlideKeyHeld` 플래그를 두어 키를 누르고 있어도 1회 탭(원샷)만 실행되도록 락 적용
+   - `StopSlide()`: 지속시간(`0.7초`) 만료 또는 점프 시 캡슐 및 마찰력 원래대로 안전 복구
+   - 달리기 중 점프 시 과도한 수평 튕겨나감을 방지하기 위해 도약 순간 수평 속도 완충(`MaxSprintJumpHorizontalSpeed = 780.0f`) 및 공중 제어력(`AirControl = 0.65f`) 튜닝
+3. **`ASparkPlayerController` Enhanced Input C++ 자동 바인딩**:
+   - Spark 아키텍처 규칙에 따라 블루프린트 노드 배치 없이 `OnPossess()` 시점에 C++로 `SprintAction`(Started/Completed) 및 `SlideAction`(Started/Completed) 바인딩
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: 게임 시작 시 슬라이딩이 멈추지 않고 영원히 지속되며 스파크가 연속 방출됨**
+  - **원인**: `BeginPlay()` 내부의 체크포인트 복원 가드문 뒤쪽에 기본 마찰력 캐싱(`DefaultGroundFriction = MoveComp->GroundFriction;`)이 위치해 있어, 일반 시작 시 캐싱 코드가 스킵되어 마찰력이 0으로 복원됨.
+  - **해결**: 기본 캡슐 높이와 마찰력(`8.0f`), 감속도(`2048.0f`) 초기화 코드를 `BeginPlay()` 최상단(가드문 이전)으로 재배치하여 해결.
+- **문제 2: 슬라이드 키 입력 시 앞으로 미끄러지지 않고 제자리에서 덜컹거리며 급감속됨**
+  - **원인**: 슬라이드 중 방향키 입력을 막아둔 상태에서 기본 `BrakingDeceleration`이 발동해 급제동이 걸렸고, 캡슐 축소 시 `bSnapToGround = true`로 인해 바닥 스냅 충돌이 일어나며 수평 속도가 0으로 죽음.
+  - **해결**: 슬라이드 중 `BrakingDecelerationWalking = 0.0f`, `GroundFriction = 0.0f`로 설정하고 `SetCapsuleHalfHeight(44.0f, false)`로 바닥 스냅 충격을 방지하여 매끄러운 1.3배 가속 활주 구현.
+
+### 결과
+
+- 달리기 질주 및 슬라이딩 시 지면 마찰 스파크와 시야 조명이 부드럽게 발생
+- 1회 탭(원샷) 슬라이드로 정확히 0.7초간 시원하게 미끄러진 뒤 원래 걷기 속도로 복귀
+- 점프 일변도의 시야 확보에서 벗어나 플랫포머 특유의 달리기-슬라이딩 플로우 완성
 
 ---
 

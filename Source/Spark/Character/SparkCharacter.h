@@ -34,6 +34,21 @@ public:
     // 점프 실행 (Wall Slide 상태일 경우 Wall Jump로 분기)
     virtual void Jump() override;
 
+    // 달리기 시작 입력 핸들러
+    void StartSprint();
+
+    // 달리기 종료 입력 핸들러
+    void StopSprint();
+
+    // 슬라이딩 시작 입력 핸들러 (키 누름)
+    void StartSlide();
+
+    // 슬라이딩 키 뗌 핸들러 (재입력 락 해제)
+    void OnSlideKeyReleased();
+
+    // 슬라이딩 종료 처리
+    void StopSlide();
+
     // 상호작용 실행 입력 핸들러
     void Interact();
 
@@ -153,7 +168,55 @@ private:
     
     // Wall Slide Spark 방출 타이밍 조절용 변수
     float LastWallSlideSparkTime = 0.0f;
-    
+
+    // 슬라이딩/달리기 상태 플래그
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Sprint", meta = (AllowPrivateAccess = "true"))
+    bool bIsSprinting = false;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    bool bIsSliding = false;
+
+    // 슬라이드 키를 꾹 누르고 있을 때 반복 실행을 방지하기 위한 키 입력 플래그
+    bool bSlideKeyHeld = false;
+
+    // 달리기 및 슬라이딩 속도 설정
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Sprint", meta = (AllowPrivateAccess = "true"))
+    float WalkSpeed = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Sprint", meta = (AllowPrivateAccess = "true"))
+    float SprintSpeed = 950.0f;
+
+    // 슬라이드 속도: SprintSpeed(950)의 약 1.3배로 설정
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    float SlideImpulse = 1235.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    float MinSlideEntrySpeed = 500.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    float SlideDuration = 0.7f;
+
+    // 슬라이딩 캡슐 절반 높이 (기본 88.0f -> 슬라이딩 시 44.0f)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    float SlideCapsuleHalfHeight = 44.0f;
+
+    float DefaultCapsuleHalfHeight = 88.0f;
+    float DefaultGroundFriction = 8.0f;
+    float DefaultBrakingDeceleration = 2048.0f;
+
+    // 마찰 스파크 타이밍 조절용 변수
+    float LastSlideSparkTime = 0.0f;
+    float LastSprintSparkTime = 0.0f;
+
+    FTimerHandle SlideTimerHandle;
+    float SlideElapsedTime = 0.0f;
+
+    // 슬라이딩 가능 여부 검사
+    bool CanSlide() const;
+
+    // 지면 마찰 스파크 갱신
+    void UpdateGroundSparks(float DeltaTime);
+
     // 착지 충돌 결과에서 실제 밟고있는 머티리얼 정보를 반환
     FHitResult ResolveLandingHit(const FHitResult& InHit) const;
     

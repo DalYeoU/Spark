@@ -29,9 +29,9 @@ ASparkCharacter::ASparkCharacter()
 
     // 입력에 즉각 반응하도록 기본 이동 스펙 설정
     GetCharacterMovement()->JumpZVelocity = 450.0f;     // 점프 높이 조절
-    GetCharacterMovement()->AirControl = 0.85f;         // 공중 제어력 (지상 대비 약 85% 반응성)
+    GetCharacterMovement()->AirControl = 0.65f;         // 공중 제어력
     GetCharacterMovement()->GravityScale = 1.2f;        // 중력 스케일
-    GetCharacterMovement()->MaxWalkSpeed = 500.0f;      // 최대 이동 속도
+    GetCharacterMovement()->MaxWalkSpeed = 600.0f;      // 기본 걷기 최대 속도
     GetCharacterMovement()->MaxAcceleration = 4096.0f;  // 입력 즉시 최대 속도에 도달하도록 가속도 상향
 
     // 3인칭 팔로우 시점을 위한 스프링암 생성, 마우스 회전과 동기화
@@ -67,6 +67,20 @@ void ASparkCharacter::BeginPlay()
     // 시작 시점의 위치를 초기 리스폰 기본값으로 기억
     RespawnLocation = GetActorLocation();
 
+    // 기본 캡슐 및 마찰 설정 캐싱
+    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
+    {
+        DefaultCapsuleHalfHeight = CapsuleComp->GetUnscaledCapsuleHalfHeight();
+    }
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        DefaultGroundFriction = 8.0f;
+        DefaultBrakingDeceleration = 2048.0f;
+        MoveComp->GroundFriction = DefaultGroundFriction;
+        MoveComp->BrakingDecelerationWalking = DefaultBrakingDeceleration;
+        MoveComp->MaxWalkSpeed = WalkSpeed;
+    }
+
     // 체크포인트 복원 플래그가 켜져 있을 때만 위치 복원 (레벨 재시작 또는 이어하기 시)
     UGameInstance* GameInstance = GetGameInstance();
     if (!GameInstance) return;
@@ -98,6 +112,9 @@ void ASparkCharacter::Tick(float DeltaTime)
     
     // 매 프레임 Wall Slide 여부 감지
     CheckWallSlide();
+
+    // 지면 마찰 스파크 및 슬라이드 감속 감지
+    UpdateGroundSparks(DeltaTime);
 }
 
 void ASparkCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -107,6 +124,9 @@ void ASparkCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 
 void ASparkCharacter::Move(const FInputActionValue& Value)
 {
+    // 슬라이딩 중에는 플레이어의 이동 입력을 무시하여 무한 미끄러짐 방지
+    if (bIsSliding) return;
+
     const FVector2D MovementVector = Value.Get<FVector2D>();
 
     if (Controller != nullptr)
@@ -319,9 +339,31 @@ void ASparkCharacter::Jump()
     if (bIsWallSliding)
     {
         DoWallJump();
-        
         return;
     }
+
+    // 슬라이딩 도중 점프 시 슬라이딩을 종료하고 도약
+    if (bIsSliding)
+    {
+        StopSlide();
+    }
+
+    // 달리기 중 점프 시 수평 속도가 너무 과하게 튀어나가지 않도록 자연스럽게 완충
+    if (bIsSprinting && GetCharacterMovement() && GetCharacterMovement()->IsMovingOnGround())
+    {
+        FVector HorizontalVelocity = GetVelocity();
+        HorizontalVelocity.Z = 0.0f;
+        const float CurrentSpeed = HorizontalVelocity.Size();
+        const float MaxSprintJumpHorizontalSpeed = 780.0f;
+
+        if (CurrentSpeed > MaxSprintJumpHorizontalSpeed)
+        {
+            FVector ClampedVelocity = HorizontalVelocity.GetSafeNormal() * MaxSprintJumpHorizontalSpeed;
+            ClampedVelocity.Z = GetCharacterMovement()->Velocity.Z;
+            GetCharacterMovement()->Velocity = ClampedVelocity;
+        }
+    }
+
     Super::Jump();
 }
 
@@ -423,3 +465,175 @@ void ASparkCharacter::RestartLevelFromCheckpoint()
         PlayerController->RestartLevel();
     }
 }
+
+void ASparkCharacter::StartSprint()
+{
+    bIsSprinting = true;
+    if (!bIsSliding && GetCharacterMovement())
+    {
+        GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+    }
+#if WITH_EDITOR
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(1001, 1.5f, FColor::Yellow, FString::Printf(TEXT("[Sprint ON] MaxSpeed: %.0f"), SprintSpeed));
+    }
+#endif
+}
+
+void ASparkCharacter::StopSprint()
+{
+    bIsSprinting = false;
+    if (!bIsSliding && GetCharacterMovement())
+    {
+        GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+    }
+#if WITH_EDITOR
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(1001, 1.5f, FColor::Silver, FString::Printf(TEXT("[Sprint OFF] MaxSpeed: %.0f"), WalkSpeed));
+    }
+#endif
+}
+
+bool ASparkCharacter::CanSlide() const
+{
+    // 이미 슬라이딩 중이거나 키를 꾹 누르고 있는 상태(손을 떼지 않음)면 재발동 절대 불가
+    if (bIsSliding || bSlideKeyHeld) return false;
+    if (!GetCharacterMovement() || !GetCharacterMovement()->IsMovingOnGround()) return false;
+    if (!bIsSprinting) return false;
+
+    const float CurrentSpeed = GetVelocity().Size2D();
+    if (CurrentSpeed < MinSlideEntrySpeed) return false;
+
+    return true;
+}
+
+void ASparkCharacter::OnSlideKeyReleased()
+{
+    // 손가락으로 키를 뗐을 때만 다음 슬라이드 입력이 가능하도록 락 해제
+    bSlideKeyHeld = false;
+}
+
+void ASparkCharacter::StartSlide()
+{
+    if (!CanSlide()) return;
+
+    bSlideKeyHeld = true; // 키를 누른 즉시 락을 걸어 손을 뗄 때까지 1회 탭으로 고정
+    bIsSliding = true;
+    SlideElapsedTime = 0.0f; // 슬라이드 경과 시간 초기화
+
+    // 캡슐 절반 높이 축소 (숙이기)
+    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
+    {
+        CapsuleComp->SetCapsuleHalfHeight(SlideCapsuleHalfHeight, false);
+    }
+
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        // 슬라이드 중에는 마찰과 브레이킹을 0으로 설정하여 감속 슬라이딩 구현
+        MoveComp->BrakingDecelerationWalking = 0.0f;
+        MoveComp->GroundFriction = 0.0f;
+        MoveComp->MaxWalkSpeed = SlideImpulse;
+
+        // 전방 슬라이드 방향 계산
+        FVector SlideDirection = GetVelocity().GetSafeNormal2D();
+        if (SlideDirection.IsNearlyZero())
+        {
+            SlideDirection = GetActorForwardVector();
+        }
+
+        // 지면을 따라 전방으로 초고속 슬라이드 추진력 주입
+        MoveComp->Velocity = SlideDirection * SlideImpulse;
+    }
+
+    // 즉시 첫 마찰 스파크 방출
+    if (SparkComponent && GetCharacterMovement())
+    {
+        const FHitResult FloorHit = ResolveLandingHit(GetCharacterMovement()->CurrentFloor.HitResult);
+        SparkComponent->TriggerSlideSpark(FloorHit);
+        LastSlideSparkTime = GetWorld()->GetTimeSeconds();
+    }
+
+#if WITH_EDITOR
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(1002, 1.5f, FColor::Cyan, TEXT("[Slide STARTED - Sliding Forward!]"));
+    }
+#endif
+}
+
+void ASparkCharacter::StopSlide()
+{
+    if (!bIsSliding) return;
+
+    bIsSliding = false;
+    SlideElapsedTime = 0.0f;
+
+    // 캡슐 높이 복구
+    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
+    {
+        CapsuleComp->SetCapsuleHalfHeight(DefaultCapsuleHalfHeight, true);
+    }
+
+    // 마찰력 및 최대 이동속도 즉시 복구
+    if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+    {
+        MoveComp->GroundFriction = DefaultGroundFriction;
+        MoveComp->BrakingDecelerationWalking = DefaultBrakingDeceleration;
+        MoveComp->MaxWalkSpeed = bIsSprinting ? SprintSpeed : WalkSpeed;
+    }
+
+#if WITH_EDITOR
+    if (GEngine)
+    {
+        GEngine->AddOnScreenDebugMessage(1002, 1.5f, FColor::Green, TEXT("[Slide ENDED - Normal Restored]"));
+    }
+#endif
+}
+
+void ASparkCharacter::UpdateGroundSparks(float DeltaTime)
+{
+    // 슬라이딩 중일 때는 정해진 시간(0.8초) 동안 시원하게 미끄러진 뒤 종료
+    if (bIsSliding)
+    {
+        SlideElapsedTime += DeltaTime;
+        const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+        // 0.8초 경과 시 슬라이딩 종료
+        if (SlideElapsedTime >= SlideDuration)
+        {
+            StopSlide();
+            return;
+        }
+
+        // 지면에 닿아 있는 동안 주기적 마찰 스파크 방출 (0.12초 주기)
+        if (SparkComponent && GetCharacterMovement() && GetCharacterMovement()->IsMovingOnGround())
+        {
+            if (CurrentTime - LastSlideSparkTime >= 0.12f)
+            {
+                LastSlideSparkTime = CurrentTime;
+                const FHitResult FloorHit = ResolveLandingHit(GetCharacterMovement()->CurrentFloor.HitResult);
+                SparkComponent->TriggerSlideSpark(FloorHit);
+            }
+        }
+        return;
+    }
+
+    // 달리기 중일 때 발바닥 스파크 (지면 상태이고 빠르게 달릴 때)
+    if (!SparkComponent || !GetCharacterMovement() || !GetCharacterMovement()->IsMovingOnGround()) return;
+
+    const float Speed = GetVelocity().Size2D();
+    const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+    if (bIsSprinting && Speed > WalkSpeed + 50.0f)
+    {
+        if (CurrentTime - LastSprintSparkTime >= 0.28f)
+        {
+            LastSprintSparkTime = CurrentTime;
+            const FHitResult FloorHit = ResolveLandingHit(GetCharacterMovement()->CurrentFloor.HitResult);
+            SparkComponent->TriggerSprintSpark(FloorHit);
+        }
+    }
+}
+

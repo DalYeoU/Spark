@@ -48,6 +48,14 @@ private:
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<UInputAction> InteractAction;
 
+    // 캐릭터 달리기 조작에 사용하는 입력 액션 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UInputAction> SprintAction;
+
+    // 캐릭터 슬라이딩 조작에 사용하는 입력 액션 에셋
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UInputAction> SlideAction;
+
     // 뷰포트에 생성할 상호작용 프롬프트 위젯 클래스
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))
     TSubclassOf<class UUserWidget> InteractionPromptWidgetClass;

@@ -244,3 +244,44 @@ void USparkComponent::TriggerWallJumpSpark(const FHitResult& HitResult)
     
     ExecuteSparkFX(FXData, SpawnLocation, Normal, HitResult);
 }
+
+void USparkComponent::TriggerSlideSpark(const FHitResult& HitResult)
+{
+    const FVector Location = !HitResult.ImpactPoint.IsNearlyZero() ? HitResult.ImpactPoint : HitResult.Location;
+    const FVector Normal = !HitResult.ImpactNormal.IsNearlyZero() ? HitResult.ImpactNormal : FVector::UpVector;
+    const FVector SpawnLocation = Location + (Normal * 5.0f);
+
+    // 기본 Fallback 값 (슬라이딩시 조명과 파티클 연출)
+    FSparkEffectData FXData;
+    FXData.LightIntensity = 8000.0f;
+    FXData.LightRadius = 600.0f;
+    FXData.LightDuration = 0.5f;
+
+    if (SparkEffectDataAsset)
+    {
+        FXData = SparkEffectDataAsset->SlideData;
+    }
+
+    ExecuteSparkFX(FXData, SpawnLocation, Normal, HitResult);
+}
+
+void USparkComponent::TriggerSprintSpark(const FHitResult& HitResult)
+{
+    const FVector Location = !HitResult.ImpactPoint.IsNearlyZero() ? HitResult.ImpactPoint : HitResult.Location;
+    const FVector Normal = !HitResult.ImpactNormal.IsNearlyZero() ? HitResult.ImpactNormal : FVector::UpVector;
+    const FVector SpawnLocation = Location + (Normal * 5.0f);
+
+    // 기본 Fallback 값 (달리기시 은은한 조명)
+    FSparkEffectData FXData;
+    FXData.LightIntensity = 3000.0f;
+    FXData.LightRadius = 350.0f;
+    FXData.LightDuration = 0.3f;
+
+    if (SparkEffectDataAsset)
+    {
+        FXData = SparkEffectDataAsset->SprintData;
+    }
+
+    ExecuteSparkFX(FXData, SpawnLocation, Normal, HitResult);
+}
+

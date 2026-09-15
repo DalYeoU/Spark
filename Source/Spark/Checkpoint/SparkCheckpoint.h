@@ -10,6 +10,9 @@ class UNiagaraSystem;
 class USoundBase;
 class UPointLightComponent;
 
+// 체크포인트 활성화를 UI 등 외부 리스너에 알리는 전역 델리게이트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCheckpointActivated, FName, ActivatedCheckpointId);
+
 /**
  * ASparkCheckpoint
  *
@@ -22,6 +25,9 @@ class SPARK_API ASparkCheckpoint : public AActor
 
 public:
 	ASparkCheckpoint();
+
+	// 체크포인트 활성화 시 방송되는 전역 델리게이트 (UI Notice 등에서 구독)
+	static FOnCheckpointActivated OnCheckpointActivatedGlobal;
 
 	// 체크포인트를 수동 또는 외부에서 활성화
 	UFUNCTION(BlueprintCallable, Category = "Checkpoint")

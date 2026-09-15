@@ -8,6 +8,8 @@
 #include "NiagaraFunctionLibrary.h"
 #include "Save/SparkSaveSubsystem.h"
 
+FOnCheckpointActivated ASparkCheckpoint::OnCheckpointActivatedGlobal;
+
 ASparkCheckpoint::ASparkCheckpoint()
 	: CheckpointId(NAME_None)
 	, bAutoSaveOnOverlap(true)
@@ -39,7 +41,7 @@ ASparkCheckpoint::ASparkCheckpoint()
 	ActiveLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("ActiveLight"));
 	ActiveLight->SetupAttachment(SceneRoot);
 	ActiveLight->SetIntensity(0.0f); // 활성화 전에는 꺼둠
-	ActiveLight->SetLightColor(FLinearColor(1.0f, 0.6f, 0.2f)); // Spark 시그니처 주황빛
+	ActiveLight->SetLightColor(FLinearColor(0.2f, 1.0f, 0.35f)); // 활성화/완료를 의미하는 Green (Accent Palette 기준)
 	ActiveLight->SetCastShadows(false);
 }
 
@@ -110,6 +112,9 @@ bool ASparkCheckpoint::ActivateCheckpoint(APawn* PlayerPawn)
 
 	// 블루프린트 연출/UI 피드백 이벤트 호출 (위젯 표시 등 추가 확장 지원)
 	BP_OnCheckpointActivated();
+
+	// UI Notice 등 외부 리스너에 활성화 알림 방송
+	OnCheckpointActivatedGlobal.Broadcast(CheckpointId);
 
 	return bSaveSuccess;
 }

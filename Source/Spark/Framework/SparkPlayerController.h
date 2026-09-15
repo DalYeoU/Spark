@@ -59,4 +59,8 @@ private:
     // 뷰포트에 생성할 상호작용 프롬프트 위젯 클래스
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))
     TSubclassOf<class UUserWidget> InteractionPromptWidgetClass;
+
+    // 뷰포트에 생성할 체크포인트 알림 위젯 클래스
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI", meta = (AllowPrivateAccess = "true"))
+    TSubclassOf<class UUserWidget> CheckpointNoticeWidgetClass;
 };

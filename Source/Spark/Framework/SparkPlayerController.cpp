@@ -33,6 +33,15 @@ void ASparkPlayerController::BeginPlay()
             PromptWidget->AddToViewport();
         }
     }
+
+    // 체크포인트 알림 UI 생성 및 뷰포트 등록
+    if (IsLocalController() && CheckpointNoticeWidgetClass)
+    {
+        if (UUserWidget* NoticeWidget = CreateWidget<UUserWidget>(this, CheckpointNoticeWidgetClass))
+        {
+            NoticeWidget->AddToViewport();
+        }
+    }
 }
 
 void ASparkPlayerController::OnPossess(APawn* InPawn)

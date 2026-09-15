@@ -1937,9 +1937,9 @@ flowchart LR
 
 ### 문제 및 해결 (Troubleshooting)
 
-- **문제 1: 게임 시작 시 슬라이딩이 멈추지 않고 영원히 지속되며 스파크가 연속 방출됨**
-  - **원인**: `BeginPlay()` 내부의 체크포인트 복원 가드문 뒤쪽에 기본 마찰력 캐싱(`DefaultGroundFriction = MoveComp->GroundFriction;`)이 위치해 있어, 일반 시작 시 캐싱 코드가 스킵되어 마찰력이 0으로 복원됨.
-  - **해결**: 기본 캡슐 높이와 마찰력(`8.0f`), 감속도(`2048.0f`) 초기화 코드를 `BeginPlay()` 최상단(가드문 이전)으로 재배치하여 해결.
+- **문제 1: 슬라이드 키를 누르고 있는 동안 슬라이드가 멈추지 않고 무한히 지속되며 스파크가 연속 방출됨**
+  - **원인**: 최초 구현에는 슬라이드 재발동을 막는 락이 없어, 키를 누르고 있는 동안 입력이 들어올 때마다 `StartSlide()`가 반복 호출됨.
+  - **해결**: `bSlideKeyHeld` 플래그를 추가해 키를 누르고 있어도 최초 1회만 슬라이드가 발동되도록 락을 걸어 해결.
 - **문제 2: 슬라이드 키 입력 시 앞으로 미끄러지지 않고 제자리에서 덜컹거리며 급감속됨**
   - **원인**: 슬라이드 중 방향키 입력을 막아둔 상태에서 기본 `BrakingDeceleration`이 발동해 급제동이 걸렸고, 캡슐 축소 시 `bSnapToGround = true`로 인해 바닥 스냅 충돌이 일어나며 수평 속도가 0으로 죽음.
   - **해결**: 슬라이드 중 `BrakingDecelerationWalking = 0.0f`, `GroundFriction = 0.0f`로 설정하고 `SetCapsuleHalfHeight(44.0f, false)`로 바닥 스냅 충격을 방지하여 매끄러운 1.3배 가속 활주 구현.
@@ -1949,6 +1949,45 @@ flowchart LR
 - 달리기 질주 및 슬라이딩 시 지면 마찰 스파크와 시야 조명이 부드럽게 발생
 - 1회 탭(원샷) 슬라이드로 정확히 0.7초간 시원하게 미끄러진 뒤 원래 걷기 속도로 복귀
 - 점프 일변도의 시야 확보에서 벗어나 플랫포머 특유의 달리기-슬라이딩 플로우 완성
+
+---
+
+## 2026-09-14 — Phase 2 Interaction & UI: 인터랙션 프롬프트 다이제틱 전환 결정 및 체크포인트 알림 UI 배선 (SPARK-53)
+
+**Milestone:** Phase 2 — Interaction & UI  
+**Category:** UI / UX / Checkpoint  
+**Status:** In Progress  
+**Branch:** feature/save-system  
+**Issues:** SPARK-53  
+
+### 목표
+
+- Interaction Prompt를 화면 고정 HUD에서 상호작용 대상 액터에 부착되는 다이제틱 UI로 전환할지 검토 및 결정
+- 체크포인트 활성화 알림 UI(SPARK-53)의 C++ 배선(델리게이트 → 위젯) 및 최소 동작 검증
+
+### 설계 변경
+
+- **Interaction Prompt 배치 방식 변경**: 화면 우하단 고정 텍스트 → 상호작용 대상 액터에 `WidgetComponent`로 부착되는 다이제틱 UI로 전환 결정. Spark의 관찰·기억 중심 정체성 및 Dead Space/Resident Evil 등 유사 장르 레퍼런스를 근거로 판단. `06_UI_UX.md`의 Interaction UI 섹션(Diegetic Attachment 항목 추가)과 와이어프레임을 갱신함.
+- **체크포인트 활성화 색상 정정**: `ASparkCheckpoint::ActiveLight`가 기존에 "Spark 시그니처 주황빛"(Warm)으로 설정돼 있었으나, `05_Art_Direction.md` Accent Palette 기준 Warm Yellow는 "기본 Spark" 전용이고 Green이 "활성화 및 완료"임을 확인. 상시 점등되는 체크포인트 라이트가 상시 발생하는 일반 Spark 이펙트와 색상으로 혼동될 위험이 있어 Green(`FLinearColor(0.2, 1.0, 0.35)`)으로 변경. `ActivationEffect`/`ActivationSound`(일회성 연출)는 Warm 유지.
+- **체크포인트 알림 UI 배치**: 저장 인디케이터(하단, `06_UI_UX.md` 와이어프레임 기준)와 동시 노출 가능성을 고려해 별도 위치인 화면 우상단으로 결정. 두 알림은 신호 성격(순간 확인 vs 진행 상태)이 달라 같은 슬롯에 두면 우선순위 충돌이 생기므로 분리 유지.
+
+### 작업 내용
+
+1. **`SparkCheckpoint.h/.cpp`**: 전역 델리게이트 `FOnCheckpointActivated OnCheckpointActivatedGlobal` 추가, `ActivateCheckpoint()` 성공 시 `CheckpointId`와 함께 브로드캐스트. `ActiveLight` 색상 Warm → Green 변경.
+2. **`Source/Spark/UI/SparkCheckpointNoticeWidget.h/.cpp` 신규 작성**: `SparkInteractionPromptWidget`과 동일한 패턴으로 델리게이트 구독 → `NoticeText` 갱신 → `BP_OnShowNotice()`(BlueprintImplementableEvent) 호출까지 구현.
+3. **`SparkPlayerController.h/.cpp`**: `CheckpointNoticeWidgetClass` 프로퍼티 추가, `BeginPlay()`에서 기존 Interaction Prompt와 동일한 방식으로 생성 후 뷰포트 등록.
+4. **`WBP_CheckpointNotice` 위젯 블루프린트 생성** (`Content/Spark/UI/HUD/`): `Canvas Panel > Size Box(Size To Content, Alignment X=1) > Horizontal Box > [Border(라인), Image(Indicator), Vertical Box(NoticeText)]` 구조로 우상단 앵커 레이아웃 구성.
+
+### 테스트 결과
+
+- PIE에서 체크포인트 오버랩 시 델리게이트 브로드캐스트 확인(`BP_OnShowNotice`에 임시 Print String으로 검증), `NoticeText`에 "체크포인트 활성화" 텍스트 반영 확인.
+- Alignment 미설정 상태에서는 Size To Content로 폭이 늘어날 때 위젯이 화면 오른쪽 밖으로 밀려나는 문제 발생 → Canvas Slot Alignment X를 1.0으로 설정해 오른쪽 끝을 기준점으로 고정하여 해결.
+
+### 알려진 문제 / 다음 작업
+
+- Widget Animation(Fade In/유지/Fade Out, Slide) 미구현 — 현재 알림이 사라지지 않고 계속 화면에 유지됨. AC("자연스럽게 사라진다") 미충족 상태라 SPARK-53은 Done 전환 보류.
+- Border/Image Indicator 색상(Green `#7CFFA0`) 및 원형 Material 스타일링 미완료.
+- 다음 세션에서 애니메이션 구현 및 스타일링 마무리 후 Jira Done 전환 예정. 이어서 Interaction Prompt 다이제틱 부착(WidgetComponent) 구현 진행.
 
 ---
 

@@ -1602,11 +1602,31 @@ Source/Spark/
 
 # Comment Convention
 
-Function과 Class 위에는 무엇을 하는 코드인지 요약하는 주석을 남긴다.
+## 주석 형식 구분
+
+- **Class 선언 상단**: Doxygen 스타일의 블록 주석(`/** ... */`)을 사용하여 클래스명과 핵심 역할을 명시한다.
+- **Member 변수, Function 선언, 코드 라인**: `/** ... */`를 지양하고 반드시 `//` 단일 라인 주석을 사용한다.
 
 ```cpp
-// Character의 착지, Wall Slide, Wall Jump 이벤트를 받아 Spark를 생성한다.
-void USparkComponent::HandleMovementEvent(...)
+/**
+ * USparkComponent
+ *
+ * Spark 생성 및 관련 연출을 전담하는 컴포넌트입니다.
+ */
+UCLASS()
+class SPARK_API USparkComponent : public UActorComponent
+{
+    GENERATED_BODY()
+
+public:
+    // 착지, Wall Slide, Wall Jump 이벤트를 받아 Spark를 생성한다.
+    void HandleMovementEvent(...);
+
+private:
+    // 현재 활성화된 스파크 강도
+    UPROPERTY(...)
+    float SparkIntensity;
+};
 ```
 
 코드 내부 개별 라인 주석은 무엇을 하는지보다
@@ -1667,9 +1687,9 @@ bool TryGenerateSpark(const FVector& ContactLocation);
 
 # Code Formatting
 
-## Braces
+## Braces and Guard Clauses
 
-중괄호는 새 줄에 작성한다.
+중괄호는 기본적으로 새 줄에 작성한다.
 
 ```cpp
 if (bCanInteract)
@@ -1678,7 +1698,14 @@ if (bCanInteract)
 }
 ```
 
-한 줄 조건문도 중괄호를 사용한다.
+### Guard Clauses (가드 절)
+- 깊은 조건문 중첩(Arrow Anti-pattern / Pyramid of Doom)을 지양하고, 함수의 시작부에서 가드 절(`Early Return`)을 적극 사용하여 들여쓰기 뎁스를 1단계로 평탄하게 유지한다.
+- **단순 조기 반환 가드문**: 단순 검증 실패 및 즉시 반환(`return;`, `return false;`, `return true;`) 형태의 한 줄 가드문은 가독성과 간결함을 위해 중괄호 `{}` 없이 한 줄로 작성하는 것을 허용 및 권장한다.
+
+```cpp
+if (!TargetActor) return false;
+if (!UGameplayStatics::DoesSaveGameExist(SlotName, UserIndex)) return false;
+```
 
 ---
 

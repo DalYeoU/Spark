@@ -79,6 +79,10 @@ void ASparkCharacter::BeginPlay()
         MoveComp->GroundFriction = DefaultGroundFriction;
         MoveComp->BrakingDecelerationWalking = DefaultBrakingDeceleration;
         MoveComp->MaxWalkSpeed = WalkSpeed;
+
+        // 슬라이드는 엔진 Crouch 시스템을 재사용해 캡슐 축소/위치 보정을 안전하게 처리
+        MoveComp->NavAgentProps.bCanCrouch = true;
+        MoveComp->CrouchedHalfHeight = SlideCapsuleHalfHeight;
     }
 
     // 체크포인트 복원 플래그가 켜져 있을 때만 위치 복원 (레벨 재시작 또는 이어하기 시)
@@ -109,12 +113,35 @@ void ASparkCharacter::BeginPlay()
 void ASparkCharacter::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
-    
+
     // 매 프레임 Wall Slide 여부 감지
     CheckWallSlide();
 
     // 지면 마찰 스파크 및 슬라이드 감속 감지
     UpdateGroundSparks(DeltaTime);
+
+    // Crouch 보정 오프셋을 서서히 0으로 되돌려 카메라가 부드럽게 이동하도록 함
+    if (!FMath::IsNearlyZero(CrouchEyeOffsetZ) && CameraBoom)
+    {
+        CrouchEyeOffsetZ = FMath::FInterpTo(CrouchEyeOffsetZ, 0.0f, DeltaTime, CrouchEyeOffsetInterpSpeed);
+        CameraBoom->SetRelativeLocation(FVector(0.0f, 0.0f, CrouchEyeOffsetZ));
+    }
+}
+
+void ASparkCharacter::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+    Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+
+    // 캡슐이 아래로 내려간 만큼 카메라를 위로 보정해 시야가 즉시 튀지 않게 함
+    CrouchEyeOffsetZ += ScaledHalfHeightAdjust;
+}
+
+void ASparkCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+    Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+
+    // 캡슐이 위로 올라간 만큼 카메라를 아래로 보정해 시야가 즉시 튀지 않게 함
+    CrouchEyeOffsetZ -= ScaledHalfHeightAdjust;
 }
 
 void ASparkCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -523,11 +550,8 @@ void ASparkCharacter::StartSlide()
     bIsSliding = true;
     SlideElapsedTime = 0.0f; // 슬라이드 경과 시간 초기화
 
-    // 캡슐 절반 높이 축소 (숙이기)
-    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
-    {
-        CapsuleComp->SetCapsuleHalfHeight(SlideCapsuleHalfHeight, false);
-    }
+    // Crouch()가 캡슐 축소와 위치 보정(Sweep 포함)을 함께 처리
+    Crouch();
 
     if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
     {
@@ -570,11 +594,8 @@ void ASparkCharacter::StopSlide()
     bIsSliding = false;
     SlideElapsedTime = 0.0f;
 
-    // 캡슐 높이 복구
-    if (UCapsuleComponent* CapsuleComp = GetCapsuleComponent())
-    {
-        CapsuleComp->SetCapsuleHalfHeight(DefaultCapsuleHalfHeight, true);
-    }
+    // UnCrouch()가 캡슐 복구와 위치 보정(Sweep 포함)을 함께 처리
+    UnCrouch();
 
     // 마찰력 및 최대 이동속도 즉시 복구
     if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())

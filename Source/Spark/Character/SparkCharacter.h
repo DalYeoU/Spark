@@ -87,6 +87,10 @@ protected:
     
     // 착지 이벤트 발생 시 세부 로직 및 피드백 처리 핸들러
     void HandleLanded(const FHitResult& Hit, float FallSpeed = 0.0f);
+
+    // Crouch 시작/종료 시 캡슐이 움직인 만큼 카메라 오프셋에 반영해 다음 Tick부터 서서히 지워지도록 함
+    virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+    virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
     
     // 전방 벽면 감지 및 wall Slide 조건 검사
     void CheckWallSlide();
@@ -210,6 +214,12 @@ private:
 
     FTimerHandle SlideTimerHandle;
     float SlideElapsedTime = 0.0f;
+
+    // Crouch로 인한 캡슐 움직임을 상쇄했다가 서서히 0으로 되돌리는 카메라 보정 오프셋
+    float CrouchEyeOffsetZ = 0.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    float CrouchEyeOffsetInterpSpeed = 12.0f;
 
     // 슬라이딩 가능 여부 검사
     bool CanSlide() const;

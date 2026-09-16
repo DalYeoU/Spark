@@ -2,6 +2,7 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/WidgetComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -10,6 +11,8 @@
 
 #include "Components/SparkComponent.h"
 #include "Components/SparkInteractionComponent.h"
+#include "UI/SparkInteractionPromptWidget.h"
+#include "Blueprint/UserWidget.h"
 #include "Save/SparkSaveSubsystem.h"
 #include "Save/SparkSaveGame.h"
 #include "Kismet/GameplayStatics.h"
@@ -50,6 +53,23 @@ ASparkCharacter::ASparkCharacter()
 
     // InteractionComponent 생성
     InteractionComponent = CreateDefaultSubobject<USparkInteractionComponent>(TEXT("InteractionComponent"));
+
+    // 상호작용 대상에 재부착되는 월드 스페이스 프롬프트 위젯, 초기에는 대상이 없으므로 숨김
+    InteractionPromptWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("InteractionPromptWidgetComponent"));
+    InteractionPromptWidgetComponent->SetupAttachment(RootComponent);
+    // 매 틱 월드 트랜스폼을 직접 계산해서 넣으므로, 캐릭터 회전(이동 시 계속 회전)이 그대로 합성되지 않도록 부모와 독립시킴
+    InteractionPromptWidgetComponent->SetUsingAbsoluteLocation(true);
+    InteractionPromptWidgetComponent->SetUsingAbsoluteRotation(true);
+    InteractionPromptWidgetComponent->SetWidgetSpace(EWidgetSpace::World);
+    InteractionPromptWidgetComponent->SetDrawSize(FVector2D(800.0f, 220.0f));
+    InteractionPromptWidgetComponent->SetPivot(FVector2D(0.5f, 1.0f));
+    InteractionPromptWidgetComponent->SetVisibility(false);
+    InteractionPromptWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+    InteractionPromptWidgetComponent->SetTwoSided(true);
+    // 기본 Blend Mode는 알파를 이진 처리해 텍스트 가장자리가 계단현상으로 깨지므로 Transparent로 전환
+    InteractionPromptWidgetComponent->SetBlendMode(EWidgetBlendMode::Transparent);
+    // 라이트를 받아 바닥에 그림자가 지는 것을 방지
+    InteractionPromptWidgetComponent->SetCastShadow(false);
 }
 
 void ASparkCharacter::Interact()
@@ -58,6 +78,62 @@ void ASparkCharacter::Interact()
     {
         InteractionComponent->PrimaryInteract();
     }
+}
+
+void ASparkCharacter::HandleInteractionTargetChanged(AActor* NewTarget)
+{
+    if (!InteractionPromptWidgetComponent) return;
+
+    if (NewTarget)
+    {
+        // 캐릭터에 계속 붙여둔 채 매 틱 월드 좌표만 갱신
+        InteractionPromptWidgetComponent->SetVisibility(true);
+        InteractionPromptWidgetComponent->SetHiddenInGame(false);
+        InteractionPromptAttachedActor = NewTarget;
+
+        // 보이자마자 즉시 위치를 갱신해 다음 Tick까지의 한 프레임 동안 이전 위치가 잠깐 보이는 것을 방지
+        UpdateInteractionPromptTransform();
+    }
+    else
+    {
+        InteractionPromptWidgetComponent->SetVisibility(false);
+        InteractionPromptAttachedActor = nullptr;
+    }
+}
+
+void ASparkCharacter::UpdateInteractionPromptTransform()
+{
+    AActor* TargetActor = InteractionPromptAttachedActor.Get();
+    if (!InteractionPromptWidgetComponent || !InteractionPromptWidgetComponent->IsVisible() || !FollowCamera || !TargetActor) return;
+
+    // X/Y는 액터 위치를 그대로 쓰고 Z만 바운딩 박스 상단 높이로 계산 (바운딩 박스 중심 X/Y는 비대칭 컴포넌트 때문에 실제 위치와 어긋날 수 있음)
+    FVector Origin, BoxExtent;
+    TargetActor->GetActorBounds(false, Origin, BoxExtent);
+    const FVector ActorLocation = TargetActor->GetActorLocation();
+    const FVector PromptLocation = FVector(ActorLocation.X, ActorLocation.Y, Origin.Z + BoxExtent.Z + InteractionPromptHeightOffset);
+    InteractionPromptWidgetComponent->SetWorldLocation(PromptLocation);
+
+    const FVector CameraLocation = FollowCamera->GetComponentLocation();
+
+    // 카메라의 Up 벡터까지 그대로 따라가는 빌보드
+    const FRotator CameraRotation = FollowCamera->GetComponentRotation();
+    const FRotator TargetRotation(-CameraRotation.Pitch, CameraRotation.Yaw + 180.0f, CameraRotation.Roll);
+    const FRotator CurrentRotation = InteractionPromptWidgetComponent->GetComponentRotation();
+    InteractionPromptWidgetComponent->SetWorldRotation(FMath::RInterpTo(CurrentRotation, TargetRotation, GetWorld()->GetDeltaSeconds(), 15.0f));
+
+    // 거리 비례로 크기를 보정해 멀어져도 가독성 유지
+    const float Distance = FVector::Dist(CameraLocation, PromptLocation);
+    const float Scale = InteractionPromptBaseScale * FMath::Clamp(Distance / InteractionPromptReferenceDistance, 0.4f, 1.0f);
+    InteractionPromptWidgetComponent->SetWorldScale3D(FVector(Scale));
+
+    // 카메라와 프롬프트 사이에 장애물이 있으면 가려짐 처리
+    FHitResult OcclusionHit;
+    FCollisionQueryParams QueryParams;
+    QueryParams.AddIgnoredActor(this);
+    // 프롬프트가 실제로 붙어있는 대상 자신을 장애물로 오판하지 않도록 트레이스에서 제외
+    QueryParams.AddIgnoredActor(InteractionPromptAttachedActor.Get());
+    const bool bOccluded = GetWorld()->LineTraceSingleByChannel(OcclusionHit, CameraLocation, PromptLocation, ECC_Visibility, QueryParams);
+    InteractionPromptWidgetComponent->SetHiddenInGame(bOccluded);
 }
 
 void ASparkCharacter::BeginPlay()
@@ -82,7 +158,22 @@ void ASparkCharacter::BeginPlay()
 
         // 슬라이드는 엔진 Crouch 시스템을 재사용해 캡슐 축소/위치 보정을 안전하게 처리
         MoveComp->NavAgentProps.bCanCrouch = true;
-        MoveComp->CrouchedHalfHeight = SlideCapsuleHalfHeight;
+        MoveComp->SetCrouchedHalfHeight(SlideCapsuleHalfHeight);
+    }
+
+    // 상호작용 대상 변경에 따라 프롬프트 위젯을 재부착
+    if (InteractionComponent)
+    {
+        InteractionComponent->OnInteractionTargetChanged.AddDynamic(this, &ASparkCharacter::HandleInteractionTargetChanged);
+    }
+
+    if (InteractionPromptWidgetComponent)
+    {
+        UUserWidget* RawWidget = InteractionPromptWidgetComponent->GetWidget();
+        if (USparkInteractionPromptWidget* PromptWidget = Cast<USparkInteractionPromptWidget>(RawWidget))
+        {
+            PromptWidget->BindInteractionComponent(InteractionComponent);
+        }
     }
 
     // 체크포인트 복원 플래그가 켜져 있을 때만 위치 복원 (레벨 재시작 또는 이어하기 시)
@@ -119,6 +210,9 @@ void ASparkCharacter::Tick(float DeltaTime)
 
     // 지면 마찰 스파크 및 슬라이드 감속 감지
     UpdateGroundSparks(DeltaTime);
+
+    // 상호작용 프롬프트가 표시 중이면 카메라를 향하도록 회전/거리 보정
+    UpdateInteractionPromptTransform();
 
     // Crouch 보정 오프셋을 서서히 0으로 되돌려 카메라가 부드럽게 이동하도록 함
     if (!FMath::IsNearlyZero(CrouchEyeOffsetZ) && CameraBoom)

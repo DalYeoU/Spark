@@ -88,7 +88,7 @@ bool ASparkCheckpoint::ActivateCheckpoint(APawn* PlayerPawn)
 	const FName CurrentLevelName = *UGameplayStatics::GetCurrentLevelName(this, true);
 	const FTransform RespawnTransform = GetRespawnTransform();
 
-	const bool bSaveSuccess = SaveSubsystem->SaveGameData(CheckpointId, CurrentLevelName, RespawnTransform);
+	SaveSubsystem->SaveGameData(CheckpointId, CurrentLevelName, RespawnTransform);
 
 	// 상태 표시 라이트 점등
 	if (ActiveLight)
@@ -116,7 +116,7 @@ bool ASparkCheckpoint::ActivateCheckpoint(APawn* PlayerPawn)
 	// UI Notice 등 외부 리스너에 활성화 알림 방송
 	OnCheckpointActivatedGlobal.Broadcast(CheckpointId);
 
-	return bSaveSuccess;
+	return true;
 }
 
 FTransform ASparkCheckpoint::GetRespawnTransform() const

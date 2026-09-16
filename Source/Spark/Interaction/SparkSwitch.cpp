@@ -7,8 +7,7 @@ ASparkSwitch::ASparkSwitch()
     PrimaryActorTick.bCanEverTick = false;
 
     // 기본 상호작용 안내 문구 설정
-    ActiveInteractionText = FText::FromString(TEXT("E 키를 눌러 장치 활성화"));
-    InactiveInteractionText = FText::FromString(TEXT("이미 활성화됨"));
+    ActiveInteractionText = FText::FromString(TEXT("장치 활성화"));
 }
 
 void ASparkSwitch::BeginPlay()
@@ -68,10 +67,5 @@ void ASparkSwitch::Interact_Implementation(APawn* InstigatorPawn)
 
 FText ASparkSwitch::GetInteractionText_Implementation() const
 {
-    if (CanInteract_Implementation(nullptr))
-    {
-        return ActiveInteractionText;
-    }
-
-    return InactiveInteractionText;
+    return ActiveInteractionText;
 }

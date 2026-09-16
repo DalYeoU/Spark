@@ -48,12 +48,8 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction")
     bool bReusable = false;
     
-    // 비활성화 상태에서 표시할 상호작용 문구
+    // 상호작용 시 표시할 안내 문구
     UPROPERTY(EditInstanceOnly, Category = "Interaction")
     FText ActiveInteractionText;
-    
-    // 활성화 상태에서 표시할 상호작용 문구
-    UPROPERTY(EditInstanceOnly, Category = "Interaction")
-    FText InactiveInteractionText;
 
 };

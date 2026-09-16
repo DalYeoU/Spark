@@ -70,12 +70,7 @@ void ASparkCableSocket::Interact_Implementation(APawn* InstigatorPawn)
 
 FText ASparkCableSocket::GetInteractionText_Implementation() const
 {
-    if (bIsPowered)
-    {
-        return FText::FromString(TEXT("전력 공급 중"));
-    }
-
-    return FText::FromString(TEXT("E 키를 눌러 케이블 연결"));
+    return FText::FromString(TEXT("케이블 연결"));
 }
 
 void ASparkCableSocket::PlugIn(ASparkCablePlug* InPlug)

@@ -6,6 +6,7 @@
 
 class USpringArmComponent;
 class UCameraComponent;
+class UWidgetComponent;
 class USparkComponent;
 class USparkInteractionComponent;
 struct FInputActionValue;
@@ -60,6 +61,8 @@ public:
 
     // 상호작용 컴포넌트 안전한 게터
     FORCEINLINE USparkInteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
+
+    FORCEINLINE UWidgetComponent* GetInteractionPromptWidgetComponent() const { return InteractionPromptWidgetComponent; }
     
     // 낙사 또는 HazardZone 오버랩시 엔진에서 호출되는 사망/실패 처리 오버라이드 함수
     virtual void FellOutOfWorld(const class UDamageType& DamageType) override;
@@ -112,6 +115,13 @@ protected:
     
     // Wall Jump 이벤트 발생 시 세부 로직 및 피드백 처리 핸들러
     void HandleWallJump();
+
+    // 상호작용 대상 변경 시 프롬프트 위젯을 새 대상에 재부착하거나 숨기는 핸들러
+    UFUNCTION()
+    void HandleInteractionTargetChanged(AActor* NewTarget);
+
+    // 프롬프트가 항상 카메라를 향하도록 회전시키고 거리에 따라 크기를 보정
+    void UpdateInteractionPromptTransform();
 
 private:
     // 캐릭터와의 거리를 유지하고 벽 충돌 시 카메라를 당겨주는 스프링암 컴포넌트
@@ -169,6 +179,24 @@ private:
     // 상호작용 대상 탐지 및 상호작용 실행을 담당하는 컴포넌트
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
     TObjectPtr<USparkInteractionComponent> InteractionComponent;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UWidgetComponent> InteractionPromptWidgetComponent;
+
+    // 프롬프트 위젯이 현재 실제로 부착되어 있는 대상 (가려짐 트레이스에서 자신을 무시하기 위한 용도)
+    TWeakObjectPtr<AActor> InteractionPromptAttachedActor;
+
+    // 포인트 마커를 대상 표면 위로 띄우는 높이 (라인은 여기서부터 위로 그려짐)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+    float InteractionPromptHeightOffset = 0.0f;
+
+    // 거리에 따른 프롬프트 크기 보정 기준 거리
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+    float InteractionPromptReferenceDistance = 250.0f;
+
+    // DrawSize는 크게 유지한 채 실제 표시 크기만 축소하기 위한 배율
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interaction", meta = (AllowPrivateAccess = "true"))
+    float InteractionPromptBaseScale = 0.25f;
     
     // Wall Slide Spark 방출 타이밍 조절용 변수
     float LastWallSlideSparkTime = 0.0f;

@@ -43,9 +43,6 @@ void USparkComponent::SpawnSparkLight(const FVector& Location, float Intensity, 
     LightComponent->SetLightColor(DefaultLightColor);
     // 캐릭터 바로 옆에서 스폰되는 짧은 이펙트라, 그림자를 켜두면 캐릭터 자신의 그림자가 바닥에 드리워짐
     LightComponent->SetCastShadows(false);
-    // 0.8~1.2초짜리 순간 플래시가 Lumen 간접광(GI)에 반영되면, Lumen이 그 빛을 캐시했다가
-    // 서서히 지우는 과정에서 벽/바닥에 잔상처럼 남는 현상이 생김. 이 정도로 짧은 VFX는
-    // 간접광 기여가 필요 없으므로 아예 제외해서 잔상을 원천 차단
     LightComponent->SetIndirectLightingIntensity(0.0f);
 
     // 잔광 페이드: Duration에 걸쳐 Intensity를 세제곱 커브로 감소시켜 "빠르게 감소" 느낌을 줌
@@ -62,10 +59,7 @@ void USparkComponent::StartLightFadeOut(UPointLightComponent* LightComponent, fl
     const float StartIntensity = Intensity;
     const float StartTime = World->GetTimeSeconds();
 
-    // 람다 실행 시점엔 조명이 이미 파괴됐을 수도 있어서 약참조로 들고 있음
     TWeakObjectPtr<UPointLightComponent> WeakLight = LightComponent;
-
-    // 람다 안에서 자기 타이머(*FadeHandle)를 직접 해제해야 해서 SharedPtr로 핸들을 공유
     TSharedPtr<FTimerHandle> FadeHandle = MakeShared<FTimerHandle>();
 
     FTimerDelegate FadeDelegate = FTimerDelegate::CreateLambda([WeakLight, World, StartTime, StartIntensity, Duration, FadeHandle]()
@@ -236,7 +230,7 @@ void USparkComponent::TriggerWallJumpSpark(const FHitResult& HitResult)
     FXData.LightRadius = 1200.0f;
     FXData.LightDuration = 1.0f;
     
-    // Data Asset이 연결되어 있으면 에셋의 설정값을 우선 적용
+    // Data Asset이 연결되어 있으면 에셋의 설정값을 우선 적용  
     if (SparkEffectDataAsset)
     {
         FXData = SparkEffectDataAsset->WallJumpData;

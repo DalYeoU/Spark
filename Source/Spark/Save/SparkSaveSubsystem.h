@@ -6,6 +6,9 @@
 
 class USparkSaveGame;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSparkSaveStartedSignature);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FSparkSaveCompletedSignature, bool, bSuccess);
+
 /**
  * USparkSaveSubsystem
  *
@@ -23,9 +26,19 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
-	// 세이브 데이터 디스크 저장 (실패 시 예외 처리 및 에러 로그 출력)
+	// 세이브 데이터 비동기 디스크 저장 시작 (완료/실패는 OnSaveCompletedGlobal 델리게이트로 통지)
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem")
-	bool SaveGameData(FName InCheckpointId, FName InLevelName, const FTransform& InPlayerTransform);
+	void SaveGameData(FName InCheckpointId, FName InLevelName, const FTransform& InPlayerTransform);
+
+	// 저장이 진행 중인지 여부 (진행 중 종료/레벨 이동 방지 등에 사용)
+	UFUNCTION(BlueprintPure, Category = "SaveSystem")
+	bool IsSaving() const { return bIsSaving; }
+
+	// Saving Indicator UI가 바인딩하는 전역 델리게이트 (저장 시작 시 브로드캐스트)
+	static FSparkSaveStartedSignature OnSaveStartedGlobal;
+
+	// Saving Indicator UI가 바인딩하는 전역 델리게이트 (저장 완료/실패 시 브로드캐스트)
+	static FSparkSaveCompletedSignature OnSaveCompletedGlobal;
 
 	// 디스크에서 세이브 데이터 로드 (실패 시 예외 처리 및 에러 로그 출력)
 	UFUNCTION(BlueprintCallable, Category = "SaveSystem")
@@ -63,6 +76,10 @@ private:
 	// 레벨 재시작 시 플레이어 위치 복원 트리거 플래그
 	UPROPERTY(Transient)
 	bool bShouldRestoreFromCheckpoint;
+
+	// 비동기 저장 진행 중 여부
+	UPROPERTY(Transient)
+	bool bIsSaving = false;
 	// 현재 로드/저장된 세이브 인스턴스 캐시
 	UPROPERTY(Transient)
 	TObjectPtr<USparkSaveGame> CurrentSaveData;

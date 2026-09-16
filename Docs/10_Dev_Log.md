@@ -1991,6 +1991,191 @@ flowchart LR
 
 ---
 
+## 2026-09-15 — SPARK-53 마무리, 슬라이드 카메라 튐 수정, Interaction Prompt 다이제틱(WidgetComponent) 전환 (SPARK-53)
+
+**Milestone:** Phase 2 — Interaction & UI
+**Category:** UI / UX / Character Movement
+**Status:** In Progress
+**Branch:** feature/save-system
+**Commit:** e285f54, 9ef183c, 7e6e102 (이번 세션 작업분은 아직 미커밋)
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- SPARK-53 체크포인트 알림 UI에 9-slice 프레임 이미지와 Fade/Slide 애니메이션을 적용해 AC("자연스럽게 사라진다") 충족
+- 슬라이딩 시작/종료 시 카메라가 순간적으로 아래로 꺼졌다 복귀하는 버그 수정
+- Interaction Prompt를 화면 고정 HUD에서 대상 액터 부착형(다이제틱) `WidgetComponent`로 전환
+
+### 작업 내용
+
+1. **`WBP_CheckpointNotice` 최종 완성**: 벡터 UMG 대신 9-slice 이미지(`T_CheckpointNoticeFrame`, `Draw As = Box`, `Content/Spark/UI/HUD`)로 프레임 재구성. `Overlay` 위에 `NoticeFrameImage` + `Vertical Box(SystemLabel, NoticeText, SubLabel)` 배치. `Render Opacity` + `Transform Translation` 키프레임 애니메이션(`Anim_Show`)을 `Auto/Cubic` 보간으로 제작, `Event BP_OnShowNotice → Play Animation`으로 연결.
+2. **`USparkCheckpointNoticeWidget`**: `NativeConstruct()`에서 `SetVisibility(ESlateVisibility::Collapsed)`로 초기 숨김, `HandleCheckpointActivated()`에서 `SetVisibility(HitTestInvisible)` 후 `BP_OnShowNotice()` 호출하도록 수정.
+3. **`ASparkCharacter` 슬라이드 리팩토링**: `StartSlide()`/`StopSlide()`의 수동 `SetCapsuleHalfHeight` + `AddActorWorldOffset` 보정을 엔진 내장 `Crouch()`/`UnCrouch()`로 교체. `OnStartCrouch()`/`OnEndCrouch()`를 오버라이드해 `CrouchEyeOffsetZ`를 즉시 보정한 뒤 `Tick()`에서 `FMath::FInterpTo`로 서서히 0으로 되돌려 카메라가 부드럽게 오르내리도록 처리. `MoveComp->NavAgentProps.bCanCrouch = true`, `SetCrouchedHalfHeight(SlideCapsuleHalfHeight)` 설정 추가.
+4. **Interaction Prompt 다이제틱 전환**: `ASparkCharacter`에 `UWidgetComponent* InteractionPromptWidgetComponent`(World Space, 재사용 단일 인스턴스) 추가. `HandleInteractionTargetChanged()`에서 대상 액터의 `RootComponent`로 재부착(`AttachToComponent`)하고 바운딩 박스 상단 + 오프셋 위치로 배치. `UpdateInteractionPromptTransform()`(매 Tick)에서 카메라를 향한 빌보드 회전, 거리 비례 스케일 보정, 라인 트레이스 기반 가려짐 처리(`SetHiddenInGame`) 구현. `SparkPlayerController`의 화면 고정 Interaction Prompt 생성 코드 제거.
+5. **Interaction Prompt UI 디자인 결정**: ChatGPT 컨설팅을 거쳐 "가이드 포인트형"(대상 지점에서 위로 뻗는 얇은 세로 라인 + 라인 끝 다이아몬드 포인트 마커 + 상단 `[E 키캡 이미지] + 행동 TextBlock`) 스타일로 확정. `06_UI_UX.md`에 반영. 키캡은 텍스트가 아닌 단일 이미지 에셋(`T_Key_E`)으로 제작해 재사용하기로 결정.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제 1: 체크포인트 알림 UI가 게임 시작 직후부터 항상 떠 있고, 활성화 애니메이션을 재생해도 사라지지 않음**
+  - **확인된 사실**: `NativeConstruct()`에서 `SetRenderOpacity(0.0f)`로 초기 숨김을 시도했을 때는 델리게이트는 정상 브로드캐스트되는데(Print 확인) 애니메이션을 재생해도 화면에 아예 나타나지 않았음.
+  - **원인 (확정)**: `Render Opacity`는 애니메이션 트랙이 매 프레임 갱신하는 값이라, `NativeConstruct`에서 설정한 초기값이 위젯 자체의 `Visibility`(레이아웃 참여 여부)와는 별개로 상호작용해 애니메이션 재생 타이밍과 충돌함.
+  - **해결**: `Visibility`를 `Collapsed`(초기) → 이벤트 시점에 `HitTestInvisible`로 전환하는 방식으로 교체. `Visibility`는 `Opacity`/`Transform`과 독립적인 속성이라 애니메이션 재생과 충돌하지 않음.
+- **문제 2: 슬라이딩 시작/종료 시 카메라(및 한때는 캐릭터)가 순간적으로 아래로 꺼졌다 복귀함**
+  - **확인된 사실**: 캡슐 축소값을 기본값(88)과 동일하게 맞춰도 여전히 카메라가 움직였고, 이는 수동 위치 보정 로직 자체가 원인이 아니라 캡슐 리사이즈에 따른 `CharacterMovementComponent`의 바닥 스냅 보정이 원인임을 시사.
+  - **원인 (확정)**: `SetCapsuleHalfHeight`를 수동 호출하면 무브먼트 컴포넌트가 이를 스윕/보정 없이 즉시 반영하면서 캐릭터가 순간적으로 재배치됨.
+  - **해결**: 엔진이 스윕 기반으로 캡슐 크기와 위치를 안전하게 처리하는 `Crouch()`/`UnCrouch()`로 교체. 이후 카메라만 위아래로 움직이는 문제가 남아 `OnStartCrouch`/`OnEndCrouch`에서 카메라 붐을 반대로 즉시 보정한 뒤 `Tick`에서 서서히 원위치로 보간(`FInterpTo`)하는 방식으로 부드럽게 처리.
+- **문제 3(자기 유발, 해결됨): 슬라이드/카메라 수정 사항이 갑자기 전부 사라지고 예전 동작으로 되돌아감**
+  - **확인된 사실**: `git stash list`에 오늘 작업분 stash가 그대로 남아있었음.
+  - **원인 (확정)**: 커밋 메시지 rewording 작업 중 `git stash -u`로 미커밋 변경사항을 임시 대피시킨 뒤, rebase 완료 후 `git stash pop`을 빠뜨리고 `git reset --hard`를 실행해 작업 트리가 예전 커밋 상태로 되돌아감.
+  - **해결**: reset 이후 추가로 작성했던 `OnStartCrouch`/`OnEndCrouch` 변경분만 패치로 별도 저장(`git diff > patch`) → 해당 파일만 `git checkout --`로 되돌림 → `git stash pop`으로 오늘 작업분 복구 → 저장해둔 패치 재적용 → `git stash drop`.
+- **문제 4(해결됨): Interaction Prompt `WidgetComponent`(World Space, `GeometryMode = Plane`)가 렌더링되지 않음**
+  - **확인된 사실**: 기본 상태(`SetTwoSided(false)`, LookAt 회전식 `(CameraLocation - PromptLocation).Rotation()`)에서는 위젯이 아예 렌더링되지 않음(백페이스 컬링으로 추정). 디버깅 중 회전 벡터 반전, 로컬 Yaw 180도 추가, `SetWorldScale3D`/`SetRenderScale` 단일 축 음수 반전 등을 시도했으나 안 보임/깜빡임/전체 반전 등 부작용만 발생.
+  - **원인 (확정)**: `WidgetComponent` Plane이 기본적으로 백페이스 컬링되어 캐릭터 위치에서 바라보는 각도에서는 렌더링되지 않음.
+  - **해결**: `SetTwoSided(true)` + 원래 LookAt 회전식(`(CameraLocation - PromptLocation).Rotation()`)으로 최종 확인 결과 텍스트 반전 없이 정상 렌더링됨.
+
+### 결과
+
+- SPARK-53 체크포인트 알림 UI가 실기(1920x1080, 1.5배 스케일) PIE에서 Fade In → 유지 → Fade Out까지 정상 동작 확인.
+- 슬라이드 시작/종료 시 카메라 튐 현상 해결, 부드러운 보간으로 체감상 튀는 느낌 없음.
+- Interaction Prompt가 대상 액터를 감지해 위치/거리 스케일/가려짐, 렌더링(텍스트 정상 표시)까지 모두 정상 동작 확인. 기본 크기(180x60, 거리 배율 0.4~1.0)로 축소 조정 완료.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| Editor (PIE) | Pass | 체크포인트 UI, 슬라이드 카메라, Interaction Prompt 감지/위치 모두 확인 |
+| Packaged Build | 미실시 | |
+| Keyboard | Pass | |
+| Gamepad | 미실시 | |
+
+### 결정
+
+- Interaction Prompt UI는 "가이드 포인트형" 라인 스타일(세로 라인 + 포인트 마커 + `[E 아이콘] + 행동 TextBlock`)로 확정. 추후 필요 시 L자형 가이드로 교체 가능하도록 라인/포인트를 별도 이미지 요소로 분리.
+- 체크포인트 UI와 동일 색 톤(Primary #FFFFFF, Sub #9CA3AF, Accent #4FA3FF, Dark BG #000000) 재사용.
+
+### 알려진 문제
+
+- `WBP_InteractionPrompt`가 아직 키캡 이미지 + 포인트 마커 + 라인 구조로 재구성되지 않음 — 관련 이미지 에셋(`T_Key_E`, `T_InteractionPoint`, `T_InteractionLine`)은 생성 완료, 임포트/배선 대기.
+- `06_UI_UX.md`에 명시된 Interaction Prompt "Unlit 렌더링" 스펙이 `UWidgetComponent`에 명시적으로 설정되지 않음 — 기본 렌더링으로 충분한지 확인 필요.
+- 이번 세션 변경분(체크포인트 UI 최종본, 슬라이드 Crouch 리팩토링, Interaction Prompt 다이제틱 전환)은 커밋 완료(`e285f54`, `9ef183c`, `7e6e102`)했으나 원격에는 미푸시.
+
+### 다음 작업
+
+- `WBP_InteractionPrompt`를 키캡+라인+포인트 구조로 재구성, `WidgetComponent`의 `Pivot`을 `(0.5, 1.0)`으로 변경해 포인트 마커가 대상 지점과 정확히 일치하도록 조정.
+- SPARK-53 최종 검증 후 Jira Done 전환.
+- 이후 SPARK-55(Saving Indicator) 배치/타이밍 결정, SPARK-54(Pause Menu + Failure Transition) 순으로 진행.
+
+---
+
+## 2026-09-16 — Interaction Prompt 가이드 포인트형 UI 배선 및 회전/텍스트 버그 수정 (SPARK-53)
+
+**Milestone:** Phase 2 — Interaction & UI
+**Category:** UI / UX
+**Status:** In Progress
+**Branch:** feature/save-system
+**Commit:** 미커밋
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- `WBP_InteractionPrompt`를 "가이드 포인트형"(포인트 마커 + 라인 + `[E 키캡] + 행동 텍스트`) 구조로 실제 배선
+- 근접 시 카메라 움직임에 따라 프롬프트가 흔들리는 문제 해결
+
+### 작업 내용
+
+1. **`WBP_InteractionPrompt` 배선**: `Canvas Panel` 하위에 `PointMarker`(`T_InteractionPoint`), `LineImage`(`T_InteractionLine`), `LabelBox`(Horizontal Box, `KeyIcon` + `InteractionText`) 배치. `LabelBox`는 Size To Content, Anchor `(0.5, 1.0)` / Alignment X `0`으로 왼쪽 끝(키캡)이 라인/마커 위치에 고정되도록 구성.
+2. **렌더링 품질 수정**: 기본 `Masked` 블렌드 모드가 텍스트 알파를 이진 처리해 가장자리가 계단현상으로 깨져 `SetBlendMode(EWidgetBlendMode::Transparent)`로 전환. 라이트를 받아 바닥에 그림자가 지는 것을 막기 위해 `SetCastShadow(false)` 추가.
+3. **`DrawSize` 반복 확장**: 실제 상호작용 문구(예: `"E 키를 눌러 케이블 집기"`)가 캔버스보다 길어 잘리는 문제로 `DrawSize`를 240×220 → 800×220까지 단계적으로 확장.
+4. **상호작용 문구 정리**: 새 UI가 이미 별도 키캡 아이콘으로 "E"를 보여주므로, `SparkCablePlug`/`SparkCableSocket`/`SparkSwitch`의 `GetInteractionText_Implementation`에서 "E 키를 눌러" 중복 접두어 제거.
+5. **죽은 코드 제거**: `SparkInteractionComponent`의 감지 로직이 `IInteractable::Execute_CanInteract`가 `false`인 액터를 애초에 대상에서 제외하기 때문에, `bIsPowered`/`bIsActivated`/`AttachedSocket` 등 "이미 완료된 상태"를 전제로 한 `GetInteractionText_Implementation`의 분기(`"전력 공급 중"`, `"이미 활성화됨"`, `"케이블 연결 완료"`)는 절대 도달하지 않는 죽은 코드였음을 확인, 삭제. `SparkSwitch`의 `InactiveInteractionText` 프로퍼티도 함께 제거.
+6. **위치 버그 수정**: `GetActorBounds()`의 `Origin`(전체 컴포넌트 AABB 중심, 비대칭 컬리전 등으로 실제 위치와 어긋날 수 있음)을 X/Y에 직접 쓰던 것을 `GetActorLocation()`으로 교체하고, Z만 `Origin.Z + BoxExtent.Z`(바운딩 박스 상단)를 사용하도록 수정.
+7. **표시 시 위치 플래시 수정**: `HandleInteractionTargetChanged()`에서 `SetVisibility(true)` 직후 `UpdateInteractionPromptTransform()`을 즉시 호출해, 다음 `Tick`까지 한 프레임 동안 이전 위치가 잠깐 보이는 현상 제거.
+8. **회전(빌보드) 안정화 시행착오**: 아래 트러블슈팅 참고.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제: 대상을 바라보며 캐릭터를 좌/우/앞/뒤로 움직이면 프롬프트가 회전 또는 위치가 흔들림 ("팔랑거림")**
+  - **확인된 사실**: 상호작용 감지 반경(약 50cm)이 짧아 카메라와 대상 사이 거리가 매우 가까움. `(CameraLocation - PromptLocation).Rotation()` 방식(LookAt)은 이 거리에서 캐릭터가 살짝만 이동해도 필요한 회전각이 크게 변함(근거리 시차). 카메라 "방향"만 따라가는 화면 정렬 방식으로 교체해도 동일하게 흔들림이 관찰됨. `RInterpTo`로 보간을 추가하자 오히려 회전 중간 상태에서 원근으로 인해 마커가 앞뒤로 밀린 것처럼 보이는 현상이 발생. 위젯을 캐릭터 `RootComponent`에 `SetUsingAbsoluteLocation/Rotation(true)`로 부모 회전과 분리해도 증상 동일.
+  - **원인 (확정)**: 완전 고정 회전은 `TwoSided`로도 측면(90도 근처)에서 평면이 두께 0이 되어 보이지 않으므로 Yaw는 카메라를 따라가야 하는데, 근접 거리에서는 아주 작은 각도 변화도 원근 때문에 시각적으로 크게 확대되어 보임 — 즉 "부드럽게 계속 따라가는" 방식 자체가 근접 상황에서는 항상 흔들림으로 보일 수밖에 없음.
+  - **해결 (검증 대기)**: 매 틱 보간하지 않고, 카메라-프롬프트 수평 각도 차이가 45도 이상 벌어졌을 때만 순간적으로 스냅하는 히스테리시스 방식으로 교체. 수평 거리가 30유닛 이하로 가까울 때는 `atan2` 불안정성을 피하기 위해 아예 각도 갱신을 건너뜀. **이 세션 종료 시점까지 사용자 최종 확인 전이라 완전히 해결됐는지는 미확정.**
+
+### 결과
+
+- Interaction Prompt UI(키캡+라인+마커)가 시각적으로 배선 완료, 텍스트 잘림/그림자/위치 오프셋 버그 수정.
+- 회전 흔들림 수정은 히스테리시스 스냅 방식까지 적용했으나 사용자 재확인 대기 중.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| Editor (PIE) | 진행 중 | 회전 안정화 최종 확인 전 |
+| Packaged Build | 미실시 | |
+
+### 알려진 문제
+
+- 회전 안정화(히스테리시스 스냅)가 실제로 "팔랑거림"을 완전히 없앴는지 미확인.
+- `06_UI_UX.md`에 명시된 Interaction Prompt "Unlit 렌더링" 스펙 미적용 여부 확인 필요 (기존 항목 이월).
+
+### 다음 작업
+
+- 회전 안정화 최종 PIE 검증.
+- SPARK-53 최종 검증 후 Jira Done 전환.
+
+---
+
+## 2026-09-17 — Interaction Prompt 빌보드 회전 잔여 흔들림 조사 및 임시 확정 (SPARK-53)
+
+**Milestone:** Phase 2 — Interaction & UI
+**Category:** UI / UX
+**Status:** In Progress
+**Branch:** feature/save-system
+**Commit:** 미커밋
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 전날 남겨둔 "이동 중 프롬프트가 좌우로 살짝 기울어짐" 이슈의 실제 재현 여부와 원인 확인
+
+### 작업 내용
+
+1. 사용자가 녹화한 블랙박스 영상 2건을 `ffmpeg`로 프레임 단위 추출(최대 15fps, 특정 구간은 원본 해상도 그대로) 및 픽셀 단위 각도 측정 스크립트로 분석. 원본 해상도 프레임 다수를 직접 확인한 결과 대부분 완벽히 수직이었고, 축소된 접촉시트에서 보였던 일부 "기울어짐"은 다운스케일 앨리어싱으로 판명.
+2. 사용자가 추가로 제공한 PIE 스크린샷에서는 실제로 위젯 전체(키캡+텍스트+라인)가 하나의 판처럼 통째로 기울어지는 것을 육안으로 확인.
+3. `UpdateInteractionPromptTransform()`에 임시 `AddOnScreenDebugMessage`를 추가해 카메라의 실제 `Pitch/Yaw/Roll`과 위젯에 실제로 적용된 `Pitch/Yaw/Roll`을 화면에 출력해 대조.
+4. 카메라 회전을 그대로 미러링하는 완전한 빌보드 공식(`Widget Pitch = -Cam Pitch`, `Widget Yaw = Cam Yaw + 180`, `Widget Roll = Cam Roll`)이 수학적으로 화면상 원근 왜곡 없이 항상 수직으로 투영됨을 수식으로 재검증(카메라 공간에서 네 꼭짓점의 depth가 모두 동일해 투영이 순수 축정렬 스케일링이 됨).
+5. 최종적으로 매 틱 순간 스냅 대신 `FMath::RInterpTo`(15배속)로 보간하도록 변경해 프레임당 회전량을 줄임.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제: 로그상 Roll이 항상 정확히 0.00으로 측정되는데도 실제로는 위젯 전체가 하나의 판처럼 기울어져 보임**
+  - **확인된 사실**: 여러 차례 캡처한 스크린샷에서 `Cam Roll`, `Widget Roll` 모두 예외 없이 `0.00`. `Widget Pitch = -Cam Pitch`, `Widget Yaw = Cam Yaw + 180` 공식도 매번 정확히 일치. 기울어짐이 관찰된 스크린샷들은 공통적으로 스크린샷 간 `Cam Yaw` 값이 크게(수십 도) 차이 나 있어, 캡처 시점에 마우스를 빠르게 돌리고 있었던 것으로 추정됨.
+  - **원인 (추정)**: 회전 계산 자체(Rotator 값)는 검증상 완전히 정확하므로, 실제 렌더링 단계에서 모션 블러/TAA가 프레임 간 큰 회전 변화량을 잔상(스미어링)으로 처리해 정지 화면 캡처 시 기울어진 것처럼 보이는 것으로 추정. 완전히 실측(예: `r.MotionBlur.Amount 0`으로 끄고 재현 여부 비교)으로 확정하지는 못함 — **미해결로 남기고 사용자 판단하에 계속 파고들지 않기로 결정**.
+  - **해결 (임시 확정)**: 목표 회전 자체는 그대로 두고 `RInterpTo`로 프레임당 회전 변화량을 줄이는 보간을 추가. 사용자가 "아주 살짝 남아있지만 이 정도면 확정하겠다"고 판단해 현재 상태로 종결. 근본 원인(모션 블러 가설)은 확정되지 않았으므로 추후 다시 문제가 두드러지면 `r.MotionBlur.Amount`부터 의심할 것.
+
+### 결과
+
+- Interaction Prompt 회전은 완전히 매끈하지는 않지만 사용자 기준 허용 가능한 수준으로 확정, 더 이상 파고들지 않기로 함.
+- 이 과정에서 별도로 발견된 사실(회귀 검증하지 않은 잠재 이슈): 블랙박스 영상에서 프롬프트 마커가 스위치 큐브의 시각적 메쉬 위치와 정확히 겹치지 않고 옆으로 살짝 어긋나 보이는 프레임이 관찰됨 — 회전과 무관한 별개의 위치 이슈일 가능성이 있으나 이번 세션에서는 조사하지 않음.
+
+### 테스트
+
+| 테스트 | 결과 | 비고 |
+|--------|------|------|
+| Editor (PIE) | Pass (허용 범위) | 완전한 해결은 아니나 사용자 승인하에 종결 |
+| Packaged Build | 미실시 | |
+
+### 알려진 문제
+
+- 이동 중 Interaction Prompt가 아주 미세하게 흔들리는 현상이 완전히 제거되지는 않음 (모션 블러/TAA 가설, 미확정).
+- 프롬프트 마커 위치가 대상 액터의 시각적 메쉬와 살짝 어긋나 보이는 프레임 관찰됨 (미조사).
+- `06_UI_UX.md`의 "Unlit 렌더링" 스펙 적용 여부 미확인 (기존 항목 이월).
+
+### 다음 작업
+
+- SPARK-53 최종 검증 후 Jira Done 전환.
+- 위 "알려진 문제" 두 항목은 재현/영향이 뚜렷해지면 별도 이슈로 조사.
+
+---
+
 # Daily Log Template
 
 
@@ -2915,6 +3100,23 @@ Spark의 Development Log는 다음 규칙을 따른다.
 - 다음 작업을 구체적인 실행 단위로 작성한다.
 - Release 전에 미해결 로그와 Known Issues를 검토한다.
 - 민감한 정보와 로컬 경로는 공개 문서에 기록하지 않는다.
+
+## 2026-09-17 — Saving Indicator UI 구현 (SPARK-55)
+
+### 확인된 사실
+- 기존 `SaveGameData`는 동기 `SaveGameToSlot`을 사용해 저장이 즉시 완료되어, "저장 중" 상태를 UI로 표시할 시간적 여유 자체가 없었음.
+- `UGameplayStatics::AsyncSaveGameToSlot` + `FAsyncSaveGameToSlotDelegate`로 전환해 저장 시작/완료를 각각 브로드캐스트하는 정적 델리게이트(`OnSaveStartedGlobal`, `OnSaveCompletedGlobal`)를 `USparkSaveSubsystem`에 추가. `ASparkCheckpoint::OnCheckpointActivatedGlobal`과 동일한 패턴이라 UI 위젯이 GameInstance 서브시스템을 조회하지 않고도 `NativeConstruct()`에서 바로 바인딩 가능.
+- `USparkSavingIndicatorWidget`(신규)이 두 델리게이트를 바인딩해 상태 텍스트("저장 중...", "저장 완료", "저장 실패")를 갱신하고, `BP_OnShowSaving`/`BP_OnSaveFinished(bool)` BlueprintImplementableEvent로 WBP 쪽 애니메이션을 트리거. `SparkCheckpointNoticeWidget`과 동일한 UI 배선 패턴(뷰포트에 `SparkPlayerController::BeginPlay()`에서 생성).
+- `06_UI_UX.md`의 Gameplay HUD 와이어프레임에 "저장 중..."이 화면 좌하단으로 명시되어 있어, WBP의 `Horizontal Box`를 Canvas Slot Anchor 0.0/1.0, Alignment 0.0/1.0로 배치.
+- 실기기 테스트에서 스피너 이미지가 회전하지 않는 것처럼 보인 문제 발생. 원인은 저장이 매우 빠르게(파일 크기가 작아 거의 즉시) 끝나 스피너가 육안으로 체감할 만큼 돌기 전에 `Stop Animation`이 호출된 것 — 애니메이션 자체의 버그가 아니었음.
+
+### 조치
+- `BP_OnSaveFinished`에서 `Stop Animation` 직후 `SpinnerImage`를 `Collapsed`로 감춰 정지된 스피너가 노출되지 않도록 하고, `BP_OnShowSaving`에서 다시 `Visible`로 되돌려 다음 저장 주기에 대비.
+- `ASparkCheckpoint::ActivateCheckpoint`는 저장 결과를 기다리지 않고 항상 `true`를 반환하도록 변경(저장 성공 여부는 UI 델리게이트로 별도 통지되므로 체크포인트 활성화 자체의 성패와 분리).
+
+### 결과 및 다음 작업
+- Saving Indicator UI 배치부터 표시/사라짐까지 사용자 확인 완료("잘 되네").
+- 다음 단계: SPARK-54(Pause Menu + Failure Transition) 착수.
 
 ---
 

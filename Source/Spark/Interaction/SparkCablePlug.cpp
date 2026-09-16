@@ -48,12 +48,7 @@ void ASparkCablePlug::Interact_Implementation(APawn* InstigatorPawn)
 
 FText ASparkCablePlug::GetInteractionText_Implementation() const
 {
-    if (AttachedSocket.IsValid())
-    {
-        return FText::FromString(TEXT("케이블 연결 완료"));
-    }
-
-    return FText::FromString(TEXT("E 키를 눌러 케이블 집기"));
+    return FText::FromString(TEXT("케이블 집기"));
 }
 
 void ASparkCablePlug::PickUp(APawn* InstigatorPawn)

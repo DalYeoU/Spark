@@ -18,6 +18,10 @@ class SPARK_API USparkInteractionPromptWidget : public UUserWidget
 {
 	GENERATED_BODY()
 	
+public:
+    // 월드 스페이스 위젯은 OwnerPlayer 확정 시점이 늦어 NativeConstruct의 자동 탐색을 쓸 수 없으므로 외부에서 직접 바인딩
+    void BindInteractionComponent(USparkInteractionComponent* InteractionComp);
+
 protected:
     // 위젯 생성 및 초기화 시 델리게이트 바인딩
     virtual void NativeConstruct() override;

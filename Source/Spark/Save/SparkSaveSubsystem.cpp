@@ -4,6 +4,9 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogSparkSave, Log, All);
 
+FSparkSaveStartedSignature USparkSaveSubsystem::OnSaveStartedGlobal;
+FSparkSaveCompletedSignature USparkSaveSubsystem::OnSaveCompletedGlobal;
+
 USparkSaveSubsystem::USparkSaveSubsystem()
 	: DefaultSlotName(TEXT("SparkDefaultSaveSlot"))
 	, DefaultUserIndex(0)
@@ -24,7 +27,7 @@ void USparkSaveSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-bool USparkSaveSubsystem::SaveGameData(FName InCheckpointId, FName InLevelName, const FTransform& InPlayerTransform)
+void USparkSaveSubsystem::SaveGameData(FName InCheckpointId, FName InLevelName, const FTransform& InPlayerTransform)
 {
 	// 기존 캐시가 없으면 새로 생성하여 세이브 데이터 준비
 	if (!CurrentSaveData)
@@ -33,7 +36,8 @@ bool USparkSaveSubsystem::SaveGameData(FName InCheckpointId, FName InLevelName, 
 		if (!CurrentSaveData)
 		{
 			UE_LOG(LogSparkSave, Error, TEXT("SaveGameData 실패: SaveGame 오브젝트 생성 실패"));
-			return false;
+			OnSaveCompletedGlobal.Broadcast(false);
+			return;
 		}
 	}
 
@@ -43,17 +47,25 @@ bool USparkSaveSubsystem::SaveGameData(FName InCheckpointId, FName InLevelName, 
 	CurrentSaveData->LevelName = InLevelName;
 	CurrentSaveData->PlayerTransform = InPlayerTransform;
 
-	// 디스크 저장 시도 및 실패 예외 처리
-	const bool bSaved = UGameplayStatics::SaveGameToSlot(CurrentSaveData, DefaultSlotName, DefaultUserIndex);
-	if (!bSaved)
-	{
-		UE_LOG(LogSparkSave, Error, TEXT("SaveGameData 실패: 슬롯 '%s'(UserIndex: %d) 파일 저장 중 오류 발생"), *DefaultSlotName, DefaultUserIndex);
-		return false;
-	}
+	bIsSaving = true;
+	OnSaveStartedGlobal.Broadcast();
 
-	UE_LOG(LogSparkSave, Log, TEXT("SaveGameData 성공: Checkpoint [%s], Level [%s], Location [%s]"),
-		*InCheckpointId.ToString(), *InLevelName.ToString(), *InPlayerTransform.GetLocation().ToString());
-	return true;
+	// 비동기 디스크 저장. 완료 시점(성공/실패 모두)에 콜백에서 결과 통지
+	FAsyncSaveGameToSlotDelegate SavedDelegate;
+	SavedDelegate.BindWeakLambda(this, [this](const FString& SlotName, const int32 UserIndex, bool bSuccess)
+	{
+		bIsSaving = false;
+		if (!bSuccess)
+		{
+			UE_LOG(LogSparkSave, Error, TEXT("SaveGameData 실패: 슬롯 '%s'(UserIndex: %d) 파일 저장 중 오류 발생"), *SlotName, UserIndex);
+		}
+		else
+		{
+			UE_LOG(LogSparkSave, Log, TEXT("SaveGameData 성공: 슬롯 '%s'(UserIndex: %d)"), *SlotName, UserIndex);
+		}
+		OnSaveCompletedGlobal.Broadcast(bSuccess);
+	});
+	UGameplayStatics::AsyncSaveGameToSlot(CurrentSaveData, DefaultSlotName, DefaultUserIndex, SavedDelegate);
 }
 
 USparkSaveGame* USparkSaveSubsystem::LoadGameData()

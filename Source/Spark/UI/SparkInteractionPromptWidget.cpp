@@ -8,27 +8,34 @@
 void USparkInteractionPromptWidget::NativeConstruct()
 {
     Super::NativeConstruct();
-    
+
     // 초기 생성 상태에서는 상호작용 대상이 없으므로 화면에서 숨김 처리
     SetVisibility(ESlateVisibility::Collapsed);
-    
-    // 플레이어 폰을 가져와 ASparkCharacter 및 USparkInteractionComponent 탐색
+
+    // 플레이어 폰을 가져와 ASparkCharacter 및 USparkInteractionComponent 탐색 (화면 고정 위젯용 경로)
     if (APawn* OwningPawn = GetOwningPlayerPawn())
     {
         if (ASparkCharacter* SparkCharacter = Cast<ASparkCharacter>(OwningPawn))
         {
-            if (USparkInteractionComponent* InteractionComp = SparkCharacter->GetInteractionComponent())
-            {
-                CachedInteractionComponent = InteractionComp;
-
-                // 상호작용 대상 변경 이벤트(OnInteractionTargetChanged)에 핸들러 함수 바인딩
-                InteractionComp->OnInteractionTargetChanged.AddDynamic(this, &USparkInteractionPromptWidget::HandleInteractionTargetChanged);
-                
-                // 위젯 생성 시점에 이미 대상이 포커스되어 있는 경우를 대비해 초기 갱신 실행
-                HandleInteractionTargetChanged(InteractionComp->GetCurrentInteractableActor());
-            }
+            BindInteractionComponent(SparkCharacter->GetInteractionComponent());
         }
     }
+}
+
+void USparkInteractionPromptWidget::BindInteractionComponent(USparkInteractionComponent* InteractionComp)
+{
+    if (!InteractionComp || CachedInteractionComponent.Get() == InteractionComp)
+    {
+        return;
+    }
+
+    CachedInteractionComponent = InteractionComp;
+
+    // 상호작용 대상 변경 이벤트(OnInteractionTargetChanged)에 핸들러 함수 바인딩
+    InteractionComp->OnInteractionTargetChanged.AddDynamic(this, &USparkInteractionPromptWidget::HandleInteractionTargetChanged);
+
+    // 바인딩 시점에 이미 대상이 포커스되어 있는 경우를 대비해 초기 갱신 실행
+    HandleInteractionTargetChanged(InteractionComp->GetCurrentInteractableActor());
 }
 
 void USparkInteractionPromptWidget::NativeDestruct()

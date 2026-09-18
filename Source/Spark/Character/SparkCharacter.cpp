@@ -16,6 +16,8 @@
 #include "Save/SparkSaveSubsystem.h"
 #include "Save/SparkSaveGame.h"
 #include "Kismet/GameplayStatics.h"
+#include "Framework/SparkPlayerController.h"
+#include "UI/SparkFailureMessageWidget.h"
 
 ASparkCharacter::ASparkCharacter()
 {
@@ -539,6 +541,48 @@ void ASparkCharacter::FellOutOfWorld(const UDamageType& DamageType)
 
 void ASparkCharacter::RespawnAtLastCheckpoint()
 {
+    APlayerController* PlayerController = Cast<APlayerController>(GetController());
+
+    // 실패 연출 중 조작이 끼어들지 않도록 입력 차단
+    if (PlayerController)
+    {
+        DisableInput(PlayerController);
+    }
+
+    // 사망 직전 마지막 스파크로 주변을 잠깐 밝혔다가 Fade Out과 함께 꺼지도록 연출
+    if (SparkComponent)
+    {
+        SparkComponent->SpawnSparkLight(GetActorLocation(), 500000.0f, 100000.0f, FailureFadeOutDuration);
+    }
+
+    // 화면을 검은색으로 가려 이후 텔레포트 순간 이동을 감춤
+    if (PlayerController && PlayerController->PlayerCameraManager)
+    {
+        PlayerController->PlayerCameraManager->StartCameraFade(0.0f, 1.0f, FailureFadeOutDuration, FLinearColor::Black, false, true);
+    }
+
+    // 완전 암전된 뒤에 안내 문구를 노출하기 위해 Fade Out이 끝날 때까지 대기
+    GetWorldTimerManager().SetTimer(FailureFadeOutTimerHandle, this, &ASparkCharacter::ShowFailureMessageAndWait, FailureFadeOutDuration, false);
+}
+
+void ASparkCharacter::ShowFailureMessageAndWait()
+{
+    APlayerController* PlayerController = Cast<APlayerController>(GetController());
+
+    // 실패 안내 문구 노출 (SYSTEM / UNIT OFFLINE + 체크포인트 복구 연출은 WBP_FailureMessage 애니메이션에서 처리)
+    if (ASparkPlayerController* SparkPlayerController = Cast<ASparkPlayerController>(PlayerController))
+    {
+        if (USparkFailureMessageWidget* FailureWidget = SparkPlayerController->GetFailureMessageWidget())
+        {
+            FailureWidget->ShowMessage(FailureMessage);
+        }
+    }
+
+    GetWorldTimerManager().SetTimer(FailureMessageTimerHandle, this, &ASparkCharacter::TeleportToCheckpointAndFadeIn, FailureMessageDuration, false);
+}
+
+void ASparkCharacter::TeleportToCheckpointAndFadeIn()
+{
     // 속도 및 움직임 초기화 후 리스폰 위치로 이동
     GetCharacterMovement()->StopActiveMovement();
     GetCharacterMovement()->Velocity = FVector::ZeroVector;
@@ -561,11 +605,31 @@ void ASparkCharacter::RespawnAtLastCheckpoint()
         SetActorLocation(RespawnLocation);
     }
 
-    // 텔레포트 자체는 즉시 처리하고, 화면만 검은색에서 서서히 밝아지게 해서 순간 이동의 위화감을 가림
     APlayerController* PlayerController = Cast<APlayerController>(GetController());
+
+    // 텔레포트 자체는 즉시 처리하고, 화면만 검은색에서 서서히 밝아지게 해서 순간 이동의 위화감을 가림
     if (PlayerController && PlayerController->PlayerCameraManager)
     {
         PlayerController->PlayerCameraManager->StartCameraFade(1.0f, 0.0f, RespawnFadeInDuration, FLinearColor::Black, false, true);
+    }
+
+    // 실패 안내 문구 숨김
+    if (ASparkPlayerController* SparkPlayerController = Cast<ASparkPlayerController>(PlayerController))
+    {
+        if (USparkFailureMessageWidget* FailureWidget = SparkPlayerController->GetFailureMessageWidget())
+        {
+            FailureWidget->HideMessage();
+        }
+    }
+
+    // Fade In이 끝난 뒤 입력 복구
+    if (PlayerController)
+    {
+        FTimerDelegate EnableInputDelegate = FTimerDelegate::CreateWeakLambda(this, [this, PlayerController]()
+        {
+            EnableInput(PlayerController);
+        });
+        GetWorldTimerManager().SetTimer(FailureFadeInTimerHandle, EnableInputDelegate, RespawnFadeInDuration, false);
     }
 }
 

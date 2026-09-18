@@ -5,6 +5,9 @@
 #include "InputMappingContext.h"
 #include "Blueprint/UserWidget.h"
 #include "Character/SparkCharacter.h"
+#include "Kismet/GameplayStatics.h"
+#include "UI/SparkFailureMessageWidget.h"
+#include "UI/SparkPauseMenuWidget.h"
 
 ASparkPlayerController::ASparkPlayerController()
 {
@@ -42,6 +45,63 @@ void ASparkPlayerController::BeginPlay()
             SavingWidget->AddToViewport();
         }
     }
+
+    // Pause Menu UI 생성 및 뷰포트 등록 (기본은 숨김)
+    if (IsLocalController() && PauseMenuWidgetClass)
+    {
+        PauseMenuWidgetInstance = CreateWidget<USparkPauseMenuWidget>(this, PauseMenuWidgetClass);
+        if (PauseMenuWidgetInstance)
+        {
+            PauseMenuWidgetInstance->AddToViewport();
+            PauseMenuWidgetInstance->SetVisibility(ESlateVisibility::Collapsed);
+        }
+    }
+
+    // 실패 안내 문구 UI 생성 및 뷰포트 등록 (기본은 숨김)
+    if (IsLocalController() && FailureMessageWidgetClass)
+    {
+        FailureMessageWidgetInstance = CreateWidget<USparkFailureMessageWidget>(this, FailureMessageWidgetClass);
+        if (FailureMessageWidgetInstance)
+        {
+            FailureMessageWidgetInstance->AddToViewport();
+        }
+    }
+}
+
+void ASparkPlayerController::TogglePauseMenu()
+{
+    SetPauseMenuVisible(!bIsPaused);
+}
+
+void ASparkPlayerController::SetPauseMenuVisible(bool bVisible)
+{
+    if (bIsPaused == bVisible) return;
+
+    bIsPaused = bVisible;
+
+    UGameplayStatics::SetGamePaused(this, bIsPaused);
+
+    if (PauseMenuWidgetInstance)
+    {
+        PauseMenuWidgetInstance->SetVisibility(bIsPaused ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    }
+
+    if (bIsPaused)
+    {
+        FInputModeGameAndUI InputMode;
+        if (PauseMenuWidgetInstance)
+        {
+            InputMode.SetWidgetToFocus(PauseMenuWidgetInstance->TakeWidget());
+        }
+        InputMode.SetHideCursorDuringCapture(false);
+        SetInputMode(InputMode);
+    }
+    else
+    {
+        SetInputMode(FInputModeGameOnly());
+    }
+
+    bShowMouseCursor = bIsPaused;
 }
 
 void ASparkPlayerController::OnPossess(APawn* InPawn)
@@ -79,6 +139,10 @@ void ASparkPlayerController::OnPossess(APawn* InPawn)
             {
                 EnhancedInputComponent->BindAction(SlideAction, ETriggerEvent::Started, SparkCharacter, &ASparkCharacter::StartSlide);
                 EnhancedInputComponent->BindAction(SlideAction, ETriggerEvent::Completed, SparkCharacter, &ASparkCharacter::OnSlideKeyReleased);
+            }
+            if (PauseAction)
+            {
+                EnhancedInputComponent->BindAction(PauseAction, ETriggerEvent::Started, this, &ASparkPlayerController::TogglePauseMenu);
             }
         }
     }

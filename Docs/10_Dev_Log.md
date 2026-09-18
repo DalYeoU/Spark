@@ -3118,6 +3118,57 @@ Spark의 Development Log는 다음 규칙을 따른다.
 - Saving Indicator UI 배치부터 표시/사라짐까지 사용자 확인 완료("잘 되네").
 - 다음 단계: SPARK-54(Pause Menu + Failure Transition) 착수.
 
+## 2026-09-17 (2) — Pause Menu + Failure Transition C++ 구현 및 UI 에셋 제작 착수 (SPARK-54)
+
+### 확인된 사실
+- 착수 전 조사 결과, Failure/Respawn 로직(`SparkHazardZone → FellOutOfWorld → RespawnAtLastCheckpoint`)은 이미 있었으나 `06_UI_UX.md` 스펙 대비 "Input Disabled"와 "Fade Out" 구간, Failure Message UI가 빠져 있었음. Pause 관련 코드(입력 액션, `SetGamePaused`, Input Mode 전환, 위젯)는 전혀 없었음.
+- Main Menu 레벨/위젯이 프로젝트에 아예 없어 "Return to Main Menu" 항목이 갈 곳이 없는 상태. 로드맵상 Main Menu는 Pause Menu보다 나중 항목이라, 이번 스코프에서는 Resume/Restart from Checkpoint/Quit Game만 실동작으로 구현하고 Settings/Controls/Return to Main Menu는 비활성화 버튼으로만 배치하기로 결정.
+
+### 구현 내용
+- `SparkCharacter::RespawnAtLastCheckpoint()`를 `DisableInput → 실패 문구 노출 → Fade Out(0.4초) → 텔레포트 → Fade In(2초) → EnableInput` 흐름으로 재구성. 텔레포트 이후 로직은 `TeleportToCheckpointAndFadeIn()`으로 분리하고 `FTimerHandle` 두 개(Fade Out 종료, Fade In 종료)로 연결.
+- `USparkFailureMessageWidget`(신규), `USparkPauseMenuWidget`(신규) 작성. 기존 `SparkSavingIndicatorWidget`과 동일하게 `BlueprintImplementableEvent`로 애니메이션은 Blueprint에 위임.
+- `SparkPlayerController`에 `PauseAction`, `SetPauseMenuVisible()`(`UGameplayStatics::SetGamePaused` + `FInputModeGameAndUI`/`FInputModeGameOnly` 전환) 추가. Pause 입력 바인딩은 다른 액션들과 동일하게 `OnPossess()`에 위치시킴 — `OnUnPossess()`에서 `ClearActionBindings()`가 전체 바인딩을 지우기 때문에, `BeginPlay()`에 한 번만 바인딩하면 재빙의 시 Pause가 죽는 버그가 생김을 미리 인지하고 피함.
+
+### 컴파일 오류 및 수정
+- `UGameplayStatics::QuitGame`은 실제로 존재하지 않는 함수였음(엔진 버전 착각) — `UKismetSystemLibrary::QuitGame`으로 교체.
+- `FInputModeGameAndUI::SetWidgetToFocus`에 위젯이 없을 때 `nullptr`을 전달하려 한 것이 `TSharedRef<SWidget>` 타입 오류로 이어짐 — 위젯이 존재할 때만 `SetWidgetToFocus`를 호출하도록 분기 처리.
+
+### UI 에셋 제작 (진행 중)
+- ChatGPT로 버튼 배경 이미지를 반복 제작. 1차 시안은 네온이 과하게 밝고 매끈해 "낡은 공장" 톤과 어긋나 재요청, 2차 시안(녹/마모 텍스처 강화)은 채택. Hover용 네온 강조 버전을 만들 때 매번 이미지 전체가 다시 그려져 베이스 텍스처(녹 위치, 다이아몬드 패턴 등)가 미묘하게 달라지는 문제를 발견 — AI 이미지 생성은 "편집"이 아니라 "재생성"이라는 한계를 재확인.
+- 받은 이미지의 배경이 알파 채널상으로는 RGBA였지만 알파 값이 전부 255(완전 불투명)라 실질적으로 검은 배경이 그대로 박혀 있었음 — PIL로 `getchannel('A').getextrema()`를 찍어서 확인. 육안으로는 투명처럼 보여도 실제 알파 값 검증이 필요함.
+- 원본 버튼 이미지 비율(약 2.5:1)이 실제 메뉴에 필요한 슬림한 버튼 비율(약 6.5:1)과 크게 달라, Nine-Slice(Box) 브러시로도 모서리 디자인이 겹치거나 눌려 보일 것으로 판단 — 이미지 자체를 목표 비율로 재요청하기로 결정.
+- Barlow Condensed SemiBold(메뉴/버튼/상호작용용), IBM Plex Mono Regular(SYSTEM/상태/기계 출력용) 폰트를 프로젝트에 반입, `Content/Spark/UI/Fonts/`에 배치.
+
+### 다음 작업
+- 비율 재조정된 버튼 이미지로 `WBP_PauseMenu` 버튼 스타일 완성, 라벨/폰트 적용.
+- `WBP_FailureMessage`, `IA_Pause` 매핑, `BP_SparkPlayerController` 프로퍼티 연결.
+- 확인 다이얼로그 배선 및 PIE 전체 흐름(Pause 진입/해제, Restart 확인, Failure Fade) 테스트.
+
+## 2026-09-18 — Pause Menu UI 완성 및 Failure Transition 연출 마무리 (SPARK-54 완료)
+
+### Pause Menu UI 완성
+- `WBP_PauseMenu`에 재조정된 비율의 버튼 이미지(Normal/Hover)를 적용하고 Barlow Condensed 폰트로 6개 버튼(Resume/Restart/Setting/Controls/Main Menu/Quit Game) 라벨링 완료.
+- 버튼에 별도 배경 이미지가 없을 때 UMG 기본 Focus Brush(사각 아웃라인)와 기본 Pressed Brush(회색 박스)가 그대로 노출되는 문제를 발견 — Style의 Outline Corner/Width를 0으로, Pressed Brush를 None으로 제거해 해결. Pressed 시 콘텐츠가 미세하게 밀리는 현상은 브러시 문제가 아니라 Style의 `Normal Padding`과 `Pressed Padding` 값이 서로 달라서였음 — 두 값을 동일하게 맞춰 해결.
+- "SYSTEM" 스타일 Restart 확인 다이얼로그를 UMG 네이티브 위젯만으로 구현(별도 이미지 추가 생성 없이 Border/Text/Horizontal Box 조합). SYSTEM 라벨 옆 가로선은 Border를 Horizontal Box Slot에서 Fill(1)로 채워 텍스트/패널 폭에 관계없이 자동으로 늘어나도록 처리.
+- 확인 다이얼로그를 버튼 목록과 같은 Vertical Box의 형제로 배치했더니 목록 레이아웃 자체가 밀리는 문제 발생 — Vertical Box(버튼 목록)와 다이얼로그를 별도 Overlay 레이어로 분리해 해결. 확인 다이얼로그가 뜰 때 뒤쪽 버튼이 그대로 보이는 게 어색해, `BP_ShowRestartConfirm`/`BP_HideRestartConfirm`에서 버튼 목록 Visibility를 Hidden/Visible로 같이 토글하도록 배선.
+- YES/NO 버튼 Hover/Pressed 색상 전환을 매번 개별 노드로 반복하지 않도록, 대괄호 2개 + 라벨 텍스트 + 밑줄 Border를 한 번에 색칠하는 `ApplyChoiceColor` 커스텀 함수로 통합. `FLinearColor`(함수 인자)와 `FSlateColor`(`Set Color and Opacity` 입력) 타입이 자동 변환되지 않아 `Make Slate Color`로 한 번 거쳐야 했음.
+
+### Failure Transition 연출 확장
+- 최초 합의했던 "Fade Out + 텍스트 오버레이" 수준에서, 참고 이미지(9단계 Death Sequence 스토리보드)를 반영해 연출을 확장하기로 재합의. 실제 로딩 없이 카메라 페이드/타이머만으로 아래 흐름을 구현:
+  - `RespawnAtLastCheckpoint()`: 입력 차단 → `SparkComponent::SpawnSparkLight`로 사망 위치에 마지막 스파크(임시 조명) 발광 → Fade Out 시작 → `FailureFadeOutDuration` 경과 후 `ShowFailureMessageAndWait()` 호출.
+  - `ShowFailureMessageAndWait()`(신규): 화면이 완전히 어두워진 뒤 안내 문구 위젯을 노출하고, `FailureMessageDuration`(연출용 가짜 대기, 1.2초)만큼 대기 후 `TeleportToCheckpointAndFadeIn()` 호출.
+  - `TeleportToCheckpointAndFadeIn()`: 기존과 동일하게 텔레포트 → Fade In → 문구 숨김 → 입력 복구.
+- `WBP_FailureMessage`에 "SYSTEM"/"UNIT OFFLINE"(C++에서 텍스트 주입) → "RESTORING FROM CHECKPOINT..." + Progress Bar 채움으로 이어지는 Widget Animation을 구성, `FailureMessageDuration`과 애니메이션 길이를 맞춤.
+- 파티클 이펙트는 새로 만들지 않고, 착지/슬라이드 Spark에 쓰던 `USparkComponent::SpawnSparkLight(Location, Intensity, Radius, Duration)`을 그대로 재사용해 "마지막 스파크로 주변이 잠깐 드러났다 꺼지는" 연출을 대체 구현 — 신규 에셋 제작 없이 스토리보드의 "마지막 Spark/주변 노출/빛의 소멸" 3단계를 카메라 Fade와 겹쳐서 표현.
+
+### 버그/이슈 및 수정
+- `USparkFailureMessageWidget::HideMessage()`가 `BP_OnHideMessage()`만 호출하고 실제 `Visibility`를 바꾸지 않아, Blueprint에 애니메이션을 구현하기 전까지는 문구가 사라지지 않는 문제 발생 — `ShowMessage()`와 대칭이 되도록 C++에서 `SetVisibility(Collapsed)`를 직접 호출하도록 수정.
+- UMG Progress Bar의 `Percent`는 0.0~1.0 범위인데 애니메이션 끝 키프레임 값을 100으로 넣어 값이 범위를 벗어나 순식간에 꽉 차 보이는 문제 발생 — 끝 키프레임을 1.0으로 수정, 키프레임 보간(Interpolation)을 Linear/Auto로 맞춰 부드럽게 채워지도록 조정.
+- `FailureMessage` 기본값을 한글("신호 손실")로 뒀더니 Barlow Condensed/IBM Plex Mono(영문 전용 폰트)가 한글 글리프를 담고 있지 않아 문자가 깨짐(tofu) — 프로젝트가 전체 영문 텍스트 기조라 기본값을 "UNIT OFFLINE"으로 교체.
+
+### 결과
+- SPARK-54 스코프(Resume/Restart/Quit Game 실동작, Settings/Controls/Main Menu 비활성 배치, Failure Transition 확장 연출)를 PIE에서 전체 흐름 확인 완료.
+
 ---
 
 # Related Documents

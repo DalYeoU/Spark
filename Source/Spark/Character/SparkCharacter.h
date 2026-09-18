@@ -171,6 +171,27 @@ private:
     // 리스폰 직후 화면이 검은색에서 밝아지는 데 걸리는 시간
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float RespawnFadeInDuration = 2.0f;
+
+    // 실패 감지 직후 화면이 검은색으로 어두워지는 데 걸리는 시간
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float FailureFadeOutDuration = 0.4f;
+
+    // 실패 시 노출할 안내 문구
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    FText FailureMessage = FText::FromString(TEXT("UNIT OFFLINE"));
+
+    // 완전 암전 후 안내 문구(및 체크포인트 복구 연출)를 노출하는 연출용 대기 시간
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float FailureMessageDuration = 1.2f;
+
+    // Fade Out 종료 후 안내 문구를 노출하기 위한 타이머
+    FTimerHandle FailureFadeOutTimerHandle;
+
+    // 안내 문구 노출 종료 후 텔레포트를 실행하기 위한 타이머
+    FTimerHandle FailureMessageTimerHandle;
+
+    // Fade In 종료 후 입력을 복구하기 위한 타이머
+    FTimerHandle FailureFadeInTimerHandle;
     
     // Spark 연출 및 라이트 생성을 담당하는 컴포넌트
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Spark", meta = (AllowPrivateAccess = "true"))
@@ -257,5 +278,11 @@ private:
 
     // 착지 충돌 결과에서 실제 밟고있는 머티리얼 정보를 반환
     FHitResult ResolveLandingHit(const FHitResult& InHit) const;
-    
+
+    // Fade Out이 끝난 뒤(완전 암전 상태) 안내 문구를 노출하고 연출용 대기를 시작
+    void ShowFailureMessageAndWait();
+
+    // 안내 문구 연출이 끝난 뒤 체크포인트로 텔레포트하고 Fade In 및 입력 복구를 진행
+    void TeleportToCheckpointAndFadeIn();
+
 };

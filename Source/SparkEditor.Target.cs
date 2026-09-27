@@ -1,5 +1,3 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
-
 using UnrealBuildTool;
 using System.Collections.Generic;
 
@@ -10,6 +8,6 @@ public class SparkEditorTarget : TargetRules
         Type = TargetType.Editor;
         DefaultBuildSettings = BuildSettingsVersion.V5;
         IncludeOrderVersion = EngineIncludeOrderVersion.Unreal5_5;
-        ExtraModuleNames.Add("Spark");
+        ExtraModuleNames.AddRange(new string[] { "Spark", "SparkEditor" });
     }
 }

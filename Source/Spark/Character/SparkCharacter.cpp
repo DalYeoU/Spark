@@ -2,6 +2,8 @@
 
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimInstance.h"
 #include "Components/WidgetComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -28,8 +30,9 @@ ASparkCharacter::ASparkCharacter()
     bUseControllerRotationYaw = false;
     bUseControllerRotationRoll = false;
 
-    // 이동 입력 방향으로 몸통이 자연스럽게 돌아가도록 설정
-    GetCharacterMovement()->bOrientRotationToMovement = true;
+    // Root Motion 전환 후에는 Velocity 방향이 항상 캐릭터 정면과 같아져서 회전 기준으로 쓸 수 없음
+    // 대신 Tick에서 입력 방향(DesiredFacingDirection)을 직접 기준으로 회전시킨다
+    GetCharacterMovement()->bOrientRotationToMovement = false;
     GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 
     // 입력에 즉각 반응하도록 기본 이동 스펙 설정
@@ -141,7 +144,16 @@ void ASparkCharacter::UpdateInteractionPromptTransform()
 void ASparkCharacter::BeginPlay()
 {
     Super::BeginPlay();
-    
+
+    // Idle/Walk/Run에 베이크된 이동을 실제 캡슐 이동으로 사용 (Root Motion 미포함 애니메이션은 영향 없음)
+    if (USkeletalMeshComponent* SkelMesh = GetMesh())
+    {
+        if (UAnimInstance* AnimInst = SkelMesh->GetAnimInstance())
+        {
+            AnimInst->SetRootMotionMode(ERootMotionMode::RootMotionFromEverything);
+        }
+    }
+
     // 시작 시점의 위치를 초기 리스폰 기본값으로 기억
     RespawnLocation = GetActorLocation();
 
@@ -216,6 +228,36 @@ void ASparkCharacter::Tick(float DeltaTime)
     // 상호작용 프롬프트가 표시 중이면 카메라를 향하도록 회전/거리 보정
     UpdateInteractionPromptTransform();
 
+    // 입력 방향으로 캐릭터를 회전 (Root Motion은 회전값이 아니라 캐릭터 정면 기준 이동값만 갖고 있음)
+    // 큰 각도(반대 방향 등)는 보간하면 도는 동안 계속 전진해버리므로 즉시 스냅한다
+    // Wall Jump 애니메이션은 뼈대 포즈만으로 회전을 표현하므로 재생 중엔 액터 회전을 건드리지 않는다
+    if (!bIsWallJumping && !DesiredFacingDirection.IsNearlyZero())
+    {
+        const FRotator CurrentRotation = GetActorRotation();
+        const FRotator TargetRotation = DesiredFacingDirection.Rotation();
+        const float YawDelta = FMath::Abs(FRotator::NormalizeAxis(TargetRotation.Yaw - CurrentRotation.Yaw));
+
+        const FRotator NewRotation = (YawDelta >= LargeTurnSnapAngle)
+            ? TargetRotation
+            : FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, 10.0f);
+        SetActorRotation(FRotator(0.0f, NewRotation.Yaw, 0.0f));
+    }
+
+    // 슬라이드 종료 Run/Sprint Montage 재생 도중 이동 입력이 풀리면 즉시 끊어서 Idle로 되돌아가게 한다
+    if (ActiveSlideEndMontage)
+    {
+        UAnimInstance* AnimInst = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+        if (!AnimInst || !AnimInst->Montage_IsPlaying(ActiveSlideEndMontage))
+        {
+            ActiveSlideEndMontage = nullptr;
+        }
+        else if (LastMovementInput.IsNearlyZero())
+        {
+            StopAnimMontage(ActiveSlideEndMontage);
+            ActiveSlideEndMontage = nullptr;
+        }
+    }
+
     // Crouch 보정 오프셋을 서서히 0으로 되돌려 카메라가 부드럽게 이동하도록 함
     if (!FMath::IsNearlyZero(CrouchEyeOffsetZ) && CameraBoom)
     {
@@ -247,10 +289,11 @@ void ASparkCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 
 void ASparkCharacter::Move(const FInputActionValue& Value)
 {
+    const FVector2D MovementVector = Value.Get<FVector2D>();
+    LastMovementInput = MovementVector;
+
     // 슬라이딩 중에는 플레이어의 이동 입력을 무시하여 무한 미끄러짐 방지
     if (bIsSliding) return;
-
-    const FVector2D MovementVector = Value.Get<FVector2D>();
 
     if (Controller != nullptr)
     {
@@ -261,6 +304,12 @@ void ASparkCharacter::Move(const FInputActionValue& Value)
         // 시점 기준 전방(X)과 우측(Y) 방향 벡터 계산
         const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
         const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+        const FVector InputDirection = ForwardDirection * MovementVector.Y + RightDirection * MovementVector.X;
+        if (!InputDirection.IsNearlyZero())
+        {
+            DesiredFacingDirection = InputDirection.GetSafeNormal();
+        }
 
         // 계산한 방향으로 이동 입력 전달
         AddMovementInput(ForwardDirection, MovementVector.Y);
@@ -293,10 +342,15 @@ void ASparkCharacter::Landed(const FHitResult& Hit)
 
 void ASparkCharacter::HandleLanded(const FHitResult& Hit, float FallSpeed)
 {
+    // ABP가 착지 순간 0으로 초기화되는 라이브 Velocity 대신 읽을 수 있도록 착지 직전 속도를 캐시
+    LastLandingFallSpeed = FallSpeed;
+
+    bIsWallJumping = false;
+
     // 착지하면 Wall Jump 쿨다운과 재사용 제한을 초기화해서 새 벽에 바로 붙을 수 있게 함
     LastWallJumpTime = -1.0f;
     bHasWallJumpedSinceGrounded = false;
-    
+
     // 바닥 정보 획득 및 Landing Spark 트리거
     if (SparkComponent)
     {
@@ -354,7 +408,7 @@ FHitResult ASparkCharacter::ResolveLandingHit(const FHitResult& InHit) const
     return LandingHit;
 }
 
-// 공중에서 정면 벽을 감지해 Wall Slide 상태를 갱신하고, 슬라이드 중이면 낙하 속도를 늦춘다.
+// 공중에서 정면 벽을 감지해 Wall Slide 상태를 갱신하고, 슬라이드 중이면 낙하 속도를 늦춘다
 void ASparkCharacter::CheckWallSlide()
 {
     // 땅에 서 있거나(공중이 아니거나), 쿨다운/재사용 제한에 걸려 있으면 애초에 벽을 감지할 필요가 없으므로 트레이스 없이 바로 상태를 해제
@@ -495,15 +549,15 @@ void ASparkCharacter::DoWallJump()
     // 벽 반대 방향과 위쪽 힘을 합쳐 튕겨나가는 점프 벡터 계산
     FVector JumpDirection = (CurrentWallNormal * WallJumpHorizontalImpulse) + (FVector::UpVector * WallJumpVerticalImpulse);
 
-    // 캐릭터가 벽 반대쪽을 보도록 회전
-    FRotator TargetRotation = CurrentWallNormal.Rotation();
-    SetActorRotation(FRotator(0.0f, TargetRotation.Yaw, 0.0f));
-
     // 계산한 방향으로 캐릭터를 튕겨냄
     LaunchCharacter(JumpDirection, true, true);
 
+    // 벽 반대 방향을 즉시 바라보도록 스냅 (애니메이션 쪽 baked 회전은 ABP Modify Bone으로 상쇄)
+    SetActorRotation(FRotator(0.0f, CurrentWallNormal.Rotation().Yaw, 0.0f));
+
     // Wall Slide 상태 해제 및 쿨다운 시작 시각 기록, 착지 전까지 재사용 금지 처리
     bIsWallSliding = false;
+    bIsWallJumping = true;
     LastWallJumpTime = GetWorld()->GetTimeSeconds();
     bHasWallJumpedSinceGrounded = true;
     
@@ -700,6 +754,12 @@ void ASparkCharacter::OnSlideKeyReleased()
     bSlideKeyHeld = false;
 }
 
+void ASparkCharacter::OnMoveInputReleased()
+{
+    // 슬라이딩 중에는 Move()가 호출되지 않으므로, 키를 뗀 시점을 여기서 직접 기록한다
+    LastMovementInput = FVector2D::ZeroVector;
+}
+
 void ASparkCharacter::StartSlide()
 {
     if (!CanSlide()) return;
@@ -726,7 +786,13 @@ void ASparkCharacter::StartSlide()
         }
 
         // 지면을 따라 전방으로 초고속 슬라이드 추진력 주입
-        MoveComp->Velocity = SlideDirection * SlideImpulse;
+        SlideVelocity = SlideDirection * SlideImpulse;
+        MoveComp->Velocity = SlideVelocity;
+    }
+
+    if (SlideStartMontage)
+    {
+        PlayAnimMontage(SlideStartMontage, 1.0f, SlideStartMontageSection);
     }
 
     // 즉시 첫 마찰 스파크 방출
@@ -763,6 +829,17 @@ void ASparkCharacter::StopSlide()
         MoveComp->MaxWalkSpeed = bIsSprinting ? SprintSpeed : WalkSpeed;
     }
 
+    // 슬라이드 중엔 Move()가 입력을 무시하므로 CurrentAcceleration이 0으로 감쇠해버린다
+    // 대신 슬라이드 중 마지막으로 들어온 이동 입력값으로 Idle/Run/Sprint를 구분한다
+    const bool bHasMoveInput = !LastMovementInput.IsNearlyZero();
+    UAnimMontage* EndMontage = !bHasMoveInput ? SlideEndToIdleMontage : (bIsSprinting ? SlideEndToSprintMontage : SlideEndToRunMontage);
+    if (EndMontage)
+    {
+        PlayAnimMontage(EndMontage);
+        // Run/Sprint Montage는 재생 도중 손을 떼도 끝까지 재생되므로, Tick에서 입력 해제를 감지해 직접 끊는다
+        ActiveSlideEndMontage = (EndMontage != SlideEndToIdleMontage) ? EndMontage : nullptr;
+    }
+
 #if WITH_EDITOR
     if (GEngine)
     {
@@ -778,6 +855,12 @@ void ASparkCharacter::UpdateGroundSparks(float DeltaTime)
     {
         SlideElapsedTime += DeltaTime;
         const float CurrentTime = GetWorld()->GetTimeSeconds();
+
+        // Idle 직후 첫 슬라이드에서 캡슐 리사이즈 등으로 한 틱 Velocity가 틀어지는 경우가 있어 매 프레임 다시 강제한다
+        if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+        {
+            MoveComp->Velocity = FVector(SlideVelocity.X, SlideVelocity.Y, MoveComp->Velocity.Z);
+        }
 
         // 0.8초 경과 시 슬라이딩 종료
         if (SlideElapsedTime >= SlideDuration)
@@ -798,21 +881,13 @@ void ASparkCharacter::UpdateGroundSparks(float DeltaTime)
         }
         return;
     }
+}
 
-    // 달리기 중일 때 발바닥 스파크 (지면 상태이고 빠르게 달릴 때)
-    if (!SparkComponent || !GetCharacterMovement() || !GetCharacterMovement()->IsMovingOnGround()) return;
+void ASparkCharacter::HandleFootstepNotify()
+{
+    if (!bIsSprinting || !SparkComponent || !GetCharacterMovement() || !GetCharacterMovement()->IsMovingOnGround()) return;
 
-    const float Speed = GetVelocity().Size2D();
-    const float CurrentTime = GetWorld()->GetTimeSeconds();
-
-    if (bIsSprinting && Speed > WalkSpeed + 50.0f)
-    {
-        if (CurrentTime - LastSprintSparkTime >= 0.28f)
-        {
-            LastSprintSparkTime = CurrentTime;
-            const FHitResult FloorHit = ResolveLandingHit(GetCharacterMovement()->CurrentFloor.HitResult);
-            SparkComponent->TriggerSprintSpark(FloorHit);
-        }
-    }
+    const FHitResult FloorHit = ResolveLandingHit(GetCharacterMovement()->CurrentFloor.HitResult);
+    SparkComponent->TriggerSprintSpark(FloorHit);
 }
 

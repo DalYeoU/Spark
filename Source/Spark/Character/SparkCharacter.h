@@ -9,6 +9,7 @@ class UCameraComponent;
 class UWidgetComponent;
 class USparkComponent;
 class USparkInteractionComponent;
+class UAnimMontage;
 struct FInputActionValue;
 
 /**
@@ -47,11 +48,17 @@ public:
     // 슬라이딩 키 뗌 핸들러 (재입력 락 해제)
     void OnSlideKeyReleased();
 
+    // 이동 입력 키를 뗐을 때 호출 (Move Input Action의 Completed에 연결)
+    void OnMoveInputReleased();
+
     // 슬라이딩 종료 처리
     void StopSlide();
 
     // 상호작용 실행 입력 핸들러
     void Interact();
+
+    // Run/Sprint 애니메이션의 발이 지면에 닿는 프레임(AnimNotify)에서 호출되어 스파크를 터뜨림
+    void HandleFootstepNotify();
 
     // 카메라 스프링암 컴포넌트 안전한 게터
     FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
@@ -63,7 +70,7 @@ public:
     FORCEINLINE USparkInteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
 
     FORCEINLINE UWidgetComponent* GetInteractionPromptWidgetComponent() const { return InteractionPromptWidgetComponent; }
-    
+
     // 낙사 또는 HazardZone 오버랩시 엔진에서 호출되는 사망/실패 처리 오버라이드 함수
     virtual void FellOutOfWorld(const class UDamageType& DamageType) override;
     
@@ -135,10 +142,26 @@ private:
     // 현재 벽 타기 상태 여부
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     bool bIsWallSliding = false;
-    
+
+    // Wall Jump 발생 직후 true로 세팅되고 착지 시 해제됨. ABP의 WallSlide->WallJump 전환 트리거로 사용
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    bool bIsWallJumping = false;
+
     // 벽 타기 시 낙하 속도 제한 (-150.0f = 천천히 미끄러짐)
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float WallSlideSpeed = -150.0f;
+
+    // 착지 시 낙하 속도(Z, 음수)가 이 값보다 작으면(3층 높이 정도) Light 착지로 판정. ABP에서 실시간 Velocity.Z 비교에 사용
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float LightLandingFallSpeedThreshold = -1300.0f;
+
+    // 착지 시 낙하 속도(Z, 음수)가 이 값보다 작으면(5층 높이 정도) Heavy 착지로 판정
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float HeavyLandingFallSpeedThreshold = -1700.0f;
+
+    // 착지 직전 속도(Z). 엔진이 착지 순간 Velocity를 0으로 초기화하므로, ABP는 라이브 Velocity 대신 이 캐시된 값을 읽어 Land 등급을 판정한다
+    UPROPERTY(BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float LastLandingFallSpeed = 0.0f;
 
     // 캐릭터 정면 기준 벽 감지 트레이스 거리
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
@@ -154,6 +177,13 @@ private:
     // Wall Jump시 위로 솟구치게 하는 수직 힘
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
     float WallJumpVerticalImpulse = 500.0f;
+
+    // Root Motion 전환 후 Velocity(=항상 캐릭터 정면 방향)로는 회전 기준을 못 잡으므로, 이번 프레임 입력 방향을 직접 저장해 Tick에서 그 방향으로 회전시킨다
+    FVector DesiredFacingDirection = FVector::ZeroVector;
+
+    // 이 각도(도) 이상 방향을 틀어야 하면 보간 없이 즉시 스냅 (반대 방향 전환 시 전진하며 도는 것 방지)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
+    float LargeTurnSnapAngle = 100.0f;
 
     // Wall Jump 직후 같은 벽을 재감지하지 않도록 막는 쿨다운 시간
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (AllowPrivateAccess = "true"))
@@ -232,6 +262,9 @@ private:
     // 슬라이드 키를 꾹 누르고 있을 때 반복 실행을 방지하기 위한 키 입력 플래그
     bool bSlideKeyHeld = false;
 
+    // 슬라이딩 중에는 Move()가 이동 입력을 무시하므로, 슬라이드 종료 시 Idle/Run 여부 판단을 위해 최근 입력값을 따로 저장한다
+    FVector2D LastMovementInput = FVector2D::ZeroVector;
+
     // 달리기 및 슬라이딩 속도 설정
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Sprint", meta = (AllowPrivateAccess = "true"))
     float WalkSpeed = 600.0f;
@@ -257,9 +290,11 @@ private:
     float DefaultGroundFriction = 8.0f;
     float DefaultBrakingDeceleration = 2048.0f;
 
+    // 슬라이드 시작 시 결정된 수평 속도. 매 프레임 다시 강제 적용해 도중에 Velocity가 틀어져도 복구되게 한다
+    FVector SlideVelocity = FVector::ZeroVector;
+
     // 마찰 스파크 타이밍 조절용 변수
     float LastSlideSparkTime = 0.0f;
-    float LastSprintSparkTime = 0.0f;
 
     FTimerHandle SlideTimerHandle;
     float SlideElapsedTime = 0.0f;
@@ -269,6 +304,30 @@ private:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
     float CrouchEyeOffsetInterpSpeed = 12.0f;
+
+    // 슬라이드 시작 시 재생하는 Montage (달리기->슬라이드 전환 포함)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UAnimMontage> SlideStartMontage;
+
+    // SlideStartMontage에서 실제 슬라이드 포즈가 시작되는 지점의 Montage Section 이름
+    // 비워두면 처음부터 재생한다. 달리는 부분을 건너뛰려면 Montage 에디터에서 Section을 나눠 이름을 지정한다
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    FName SlideStartMontageSection = NAME_None;
+
+    // 슬라이드 종료 후 Run으로 이어지는 Montage
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UAnimMontage> SlideEndToRunMontage;
+
+    // 슬라이드 종료 후 Sprint로 이어지는 Montage
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UAnimMontage> SlideEndToSprintMontage;
+
+    // 슬라이드 종료 후 이동 입력이 없을 때 이어지는 Montage
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement|Slide", meta = (AllowPrivateAccess = "true"))
+    TObjectPtr<UAnimMontage> SlideEndToIdleMontage;
+
+    // 재생 중인 슬라이드 종료 Montage. 재생 도중 이동 입력이 풀리면 Tick에서 직접 끊는다
+    TObjectPtr<UAnimMontage> ActiveSlideEndMontage;
 
     // 슬라이딩 가능 여부 검사
     bool CanSlide() const;

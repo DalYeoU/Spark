@@ -116,6 +116,7 @@ void ASparkPlayerController::OnPossess(APawn* InPawn)
             if (MoveAction)
             {
                 EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, SparkCharacter, &ASparkCharacter::Move);
+                EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Completed, SparkCharacter, &ASparkCharacter::OnMoveInputReleased);
             }
             if (LookAction)
             {

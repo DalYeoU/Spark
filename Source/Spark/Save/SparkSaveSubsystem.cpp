@@ -41,6 +41,7 @@ void USparkSaveSubsystem::SaveGameData(FName InCheckpointId, FName InLevelName, 
 		}
 	}
 
+	CurrentSaveData->SaveVersion = USparkSaveGame::CurrentSaveVersion;
 	CurrentSaveData->SaveSlotName = DefaultSlotName;
 	CurrentSaveData->UserIndex = DefaultUserIndex;
 	CurrentSaveData->CheckpointId = InCheckpointId;
@@ -96,6 +97,13 @@ USparkSaveGame* USparkSaveSubsystem::LoadGameData()
 		return nullptr;
 	}
 
+	if (!SparkSave->IsCompatible())
+	{
+		UE_LOG(LogSparkSave, Error, TEXT("LoadGameData 실패: 세이브 버전(%d)이 현재 지원 버전(%d)보다 높습니다."), SparkSave->SaveVersion, USparkSaveGame::CurrentSaveVersion);
+		CurrentSaveData = nullptr;
+		return nullptr;
+	}
+
 	CurrentSaveData = SparkSave;
 	UE_LOG(LogSparkSave, Log, TEXT("LoadGameData 성공: Checkpoint [%s], Level [%s], Location [%s]"),
 		*CurrentSaveData->CheckpointId.ToString(), *CurrentSaveData->LevelName.ToString(), *CurrentSaveData->PlayerTransform.GetLocation().ToString());
@@ -116,7 +124,7 @@ bool USparkSaveSubsystem::CanContinue() const
 	if (!LoadedGame)  return false;
 
 	const USparkSaveGame* SparkSave = Cast<USparkSaveGame>(LoadedGame);
-	if (!SparkSave) return false;
+	if (!SparkSave || !SparkSave->IsCompatible()) return false;
 
 	// 레벨 이름이나 체크포인트 ID가 기록되어 있는지 확인
 	return (!SparkSave->LevelName.IsNone() || !SparkSave->CheckpointId.IsNone());

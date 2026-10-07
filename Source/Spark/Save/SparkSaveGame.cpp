@@ -1,7 +1,8 @@
 #include "Save/SparkSaveGame.h"
 
 USparkSaveGame::USparkSaveGame()
-	: SaveSlotName(TEXT("SparkDefaultSaveSlot"))
+	: SaveVersion(0)
+	, SaveSlotName(TEXT("SparkDefaultSaveSlot"))
 	, UserIndex(0)
 	, CheckpointId(NAME_None)
 	, LevelName(NAME_None)

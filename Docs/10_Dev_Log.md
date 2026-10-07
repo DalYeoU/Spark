@@ -2504,6 +2504,46 @@ flowchart LR
 
 ---
 
+## 2026-10-07 (2) — 세이브 포맷 버전 필드 추가 및 Save 자동화 테스트 작성
+
+**Category:** Save System
+**Status:** 완료
+**Branch:** feature/save-system
+**Engine:** Unreal Engine 5.5.4
+
+### 확인된 사실
+
+- 로드맵 Phase 3의 "Save Compatibility"와 "Save 데이터가 반복 테스트를 통과한다"가 남아 있었고, Basic Save System 항목(SaveGame, Checkpoint ID, Level, Transform, 실패 처리)은 이미 충족된 상태였음.
+- 2026-09-11 항목에 "자동화 테스트 검증 완료"라고 적혀 있었으나 저장소에는 자동화 테스트 코드가 없었음. 이번에 처음으로 코드로 남김.
+
+### 작업 내용
+
+- `USparkSaveGame`에 `SaveVersion`(기본 0)과 `CurrentSaveVersion`(=1), `IsCompatible()`을 추가. 필드를 추가/변경할 때마다 `CurrentSaveVersion`을 올린다.
+- `SaveGameData`가 저장할 때 현재 버전을 기록하고, `LoadGameData`/`CanContinue`는 더 새로운 버전으로 저장된 파일을 거부한다(`nullptr`/`false`). 버전 필드 도입 전 세이브는 0으로 읽혀 그대로 호환된다.
+- `Source/Spark/Save/SparkSaveTest.cpp`에 `Spark.Save.RoundTrip` 자동화 테스트 추가: 없는 슬롯 로드 시 `nullptr`, 저장/로드 왕복 시 ID/레벨/트랜스폼/버전 유지, 새 버전의 비호환 판정을 검증한다. 테스트 전용 슬롯을 쓰고 시작과 끝에 삭제해 실제 세이브에 영향이 없다.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: `EAutomationTestFlags::ApplicationContextMask`에서 C2838/C2065 컴파일 오류 발생.
+  - **원인 (확정)**: UE 5.5에서 `ApplicationContextMask`는 `EAutomationTestFlags`의 멤버가 아님.
+  - **해결**: 에디터에서만 실행되는 테스트이므로 `EditorContext | ProductFilter`로 변경.
+
+### 테스트
+
+| 테스트 항목 | 결과 | 비고 |
+|------------|------|------|
+| Spark.Save.RoundTrip | Pass | Session Frontend Automation 실행 |
+| 기존 세이브로 PIE 이어하기/복원 | 미확인 | 수동 확인 필요 |
+| 체크포인트 연속 통과 | 미확인 | 수동 확인 필요 |
+| 저장 도중 PIE 종료 | 미확인 | 수동 확인 필요 |
+
+### 다음 작업
+
+- 위 수동 확인 3건 진행. 연속 체크포인트에서 `bIsSaving` 중 `SaveGameData` 재호출 문제가 보이면 그때 처리.
+- Continue(이어하기) 연결은 Main Menu 구현 이후로 보류.
+
+---
+
 # Daily Log Template
 
 

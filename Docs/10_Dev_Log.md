@@ -2176,6 +2176,334 @@ flowchart LR
 
 ---
 
+## 2026-09-17 — Saving Indicator UI 구현 (SPARK-55)
+
+### 확인된 사실
+- 기존 `SaveGameData`는 동기 `SaveGameToSlot`을 사용해 저장이 즉시 완료되어, "저장 중" 상태를 UI로 표시할 시간적 여유 자체가 없었음.
+- `UGameplayStatics::AsyncSaveGameToSlot` + `FAsyncSaveGameToSlotDelegate`로 전환해 저장 시작/완료를 각각 브로드캐스트하는 정적 델리게이트(`OnSaveStartedGlobal`, `OnSaveCompletedGlobal`)를 `USparkSaveSubsystem`에 추가. `ASparkCheckpoint::OnCheckpointActivatedGlobal`과 동일한 패턴이라 UI 위젯이 GameInstance 서브시스템을 조회하지 않고도 `NativeConstruct()`에서 바로 바인딩 가능.
+- `USparkSavingIndicatorWidget`(신규)이 두 델리게이트를 바인딩해 상태 텍스트("저장 중...", "저장 완료", "저장 실패")를 갱신하고, `BP_OnShowSaving`/`BP_OnSaveFinished(bool)` BlueprintImplementableEvent로 WBP 쪽 애니메이션을 트리거. `SparkCheckpointNoticeWidget`과 동일한 UI 배선 패턴(뷰포트에 `SparkPlayerController::BeginPlay()`에서 생성).
+- `06_UI_UX.md`의 Gameplay HUD 와이어프레임에 "저장 중..."이 화면 좌하단으로 명시되어 있어, WBP의 `Horizontal Box`를 Canvas Slot Anchor 0.0/1.0, Alignment 0.0/1.0로 배치.
+- 실기기 테스트에서 스피너 이미지가 회전하지 않는 것처럼 보인 문제 발생. 원인은 저장이 매우 빠르게(파일 크기가 작아 거의 즉시) 끝나 스피너가 육안으로 체감할 만큼 돌기 전에 `Stop Animation`이 호출된 것 — 애니메이션 자체의 버그가 아니었음.
+
+### 조치
+- `BP_OnSaveFinished`에서 `Stop Animation` 직후 `SpinnerImage`를 `Collapsed`로 감춰 정지된 스피너가 노출되지 않도록 하고, `BP_OnShowSaving`에서 다시 `Visible`로 되돌려 다음 저장 주기에 대비.
+- `ASparkCheckpoint::ActivateCheckpoint`는 저장 결과를 기다리지 않고 항상 `true`를 반환하도록 변경(저장 성공 여부는 UI 델리게이트로 별도 통지되므로 체크포인트 활성화 자체의 성패와 분리).
+
+### 결과 및 다음 작업
+- Saving Indicator UI 배치부터 표시/사라짐까지 사용자 확인 완료("잘 되네").
+- 다음 단계: SPARK-54(Pause Menu + Failure Transition) 착수.
+
+---
+
+## 2026-09-17 (2) — Pause Menu + Failure Transition C++ 구현 및 UI 에셋 제작 착수 (SPARK-54)
+
+### 확인된 사실
+- 착수 전 조사 결과, Failure/Respawn 로직(`SparkHazardZone → FellOutOfWorld → RespawnAtLastCheckpoint`)은 이미 있었으나 `06_UI_UX.md` 스펙 대비 "Input Disabled"와 "Fade Out" 구간, Failure Message UI가 빠져 있었음. Pause 관련 코드(입력 액션, `SetGamePaused`, Input Mode 전환, 위젯)는 전혀 없었음.
+- Main Menu 레벨/위젯이 프로젝트에 아예 없어 "Return to Main Menu" 항목이 갈 곳이 없는 상태. 로드맵상 Main Menu는 Pause Menu보다 나중 항목이라, 이번 스코프에서는 Resume/Restart from Checkpoint/Quit Game만 실동작으로 구현하고 Settings/Controls/Return to Main Menu는 비활성화 버튼으로만 배치하기로 결정.
+
+### 구현 내용
+- `SparkCharacter::RespawnAtLastCheckpoint()`를 `DisableInput → 실패 문구 노출 → Fade Out(0.4초) → 텔레포트 → Fade In(2초) → EnableInput` 흐름으로 재구성. 텔레포트 이후 로직은 `TeleportToCheckpointAndFadeIn()`으로 분리하고 `FTimerHandle` 두 개(Fade Out 종료, Fade In 종료)로 연결.
+- `USparkFailureMessageWidget`(신규), `USparkPauseMenuWidget`(신규) 작성. 기존 `SparkSavingIndicatorWidget`과 동일하게 `BlueprintImplementableEvent`로 애니메이션은 Blueprint에 위임.
+- `SparkPlayerController`에 `PauseAction`, `SetPauseMenuVisible()`(`UGameplayStatics::SetGamePaused` + `FInputModeGameAndUI`/`FInputModeGameOnly` 전환) 추가. Pause 입력 바인딩은 다른 액션들과 동일하게 `OnPossess()`에 위치시킴 — `OnUnPossess()`에서 `ClearActionBindings()`가 전체 바인딩을 지우기 때문에, `BeginPlay()`에 한 번만 바인딩하면 재빙의 시 Pause가 죽는 버그가 생김을 미리 인지하고 피함.
+
+### 컴파일 오류 및 수정
+- `UGameplayStatics::QuitGame`은 실제로 존재하지 않는 함수였음(엔진 버전 착각) — `UKismetSystemLibrary::QuitGame`으로 교체.
+- `FInputModeGameAndUI::SetWidgetToFocus`에 위젯이 없을 때 `nullptr`을 전달하려 한 것이 `TSharedRef<SWidget>` 타입 오류로 이어짐 — 위젯이 존재할 때만 `SetWidgetToFocus`를 호출하도록 분기 처리.
+
+### UI 에셋 제작 (진행 중)
+- ChatGPT로 버튼 배경 이미지를 반복 제작. 1차 시안은 네온이 과하게 밝고 매끈해 "낡은 공장" 톤과 어긋나 재요청, 2차 시안(녹/마모 텍스처 강화)은 채택. Hover용 네온 강조 버전을 만들 때 매번 이미지 전체가 다시 그려져 베이스 텍스처(녹 위치, 다이아몬드 패턴 등)가 미묘하게 달라지는 문제를 발견 — AI 이미지 생성은 "편집"이 아니라 "재생성"이라는 한계를 재확인.
+- 받은 이미지의 배경이 알파 채널상으로는 RGBA였지만 알파 값이 전부 255(완전 불투명)라 실질적으로 검은 배경이 그대로 박혀 있었음 — PIL로 `getchannel('A').getextrema()`를 찍어서 확인. 육안으로는 투명처럼 보여도 실제 알파 값 검증이 필요함.
+- 원본 버튼 이미지 비율(약 2.5:1)이 실제 메뉴에 필요한 슬림한 버튼 비율(약 6.5:1)과 크게 달라, Nine-Slice(Box) 브러시로도 모서리 디자인이 겹치거나 눌려 보일 것으로 판단 — 이미지 자체를 목표 비율로 재요청하기로 결정.
+- Barlow Condensed SemiBold(메뉴/버튼/상호작용용), IBM Plex Mono Regular(SYSTEM/상태/기계 출력용) 폰트를 프로젝트에 반입, `Content/Spark/UI/Fonts/`에 배치.
+
+### 다음 작업
+- 비율 재조정된 버튼 이미지로 `WBP_PauseMenu` 버튼 스타일 완성, 라벨/폰트 적용.
+- `WBP_FailureMessage`, `IA_Pause` 매핑, `BP_SparkPlayerController` 프로퍼티 연결.
+- 확인 다이얼로그 배선 및 PIE 전체 흐름(Pause 진입/해제, Restart 확인, Failure Fade) 테스트.
+
+---
+
+## 2026-09-18 — Pause Menu UI 완성 및 Failure Transition 연출 마무리 (SPARK-54 완료)
+
+### Pause Menu UI 완성
+- `WBP_PauseMenu`에 재조정된 비율의 버튼 이미지(Normal/Hover)를 적용하고 Barlow Condensed 폰트로 6개 버튼(Resume/Restart/Setting/Controls/Main Menu/Quit Game) 라벨링 완료.
+- 버튼에 별도 배경 이미지가 없을 때 UMG 기본 Focus Brush(사각 아웃라인)와 기본 Pressed Brush(회색 박스)가 그대로 노출되는 문제를 발견 — Style의 Outline Corner/Width를 0으로, Pressed Brush를 None으로 제거해 해결. Pressed 시 콘텐츠가 미세하게 밀리는 현상은 브러시 문제가 아니라 Style의 `Normal Padding`과 `Pressed Padding` 값이 서로 달라서였음 — 두 값을 동일하게 맞춰 해결.
+- "SYSTEM" 스타일 Restart 확인 다이얼로그를 UMG 네이티브 위젯만으로 구현(별도 이미지 추가 생성 없이 Border/Text/Horizontal Box 조합). SYSTEM 라벨 옆 가로선은 Border를 Horizontal Box Slot에서 Fill(1)로 채워 텍스트/패널 폭에 관계없이 자동으로 늘어나도록 처리.
+- 확인 다이얼로그를 버튼 목록과 같은 Vertical Box의 형제로 배치했더니 목록 레이아웃 자체가 밀리는 문제 발생 — Vertical Box(버튼 목록)와 다이얼로그를 별도 Overlay 레이어로 분리해 해결. 확인 다이얼로그가 뜰 때 뒤쪽 버튼이 그대로 보이는 게 어색해, `BP_ShowRestartConfirm`/`BP_HideRestartConfirm`에서 버튼 목록 Visibility를 Hidden/Visible로 같이 토글하도록 배선.
+- YES/NO 버튼 Hover/Pressed 색상 전환을 매번 개별 노드로 반복하지 않도록, 대괄호 2개 + 라벨 텍스트 + 밑줄 Border를 한 번에 색칠하는 `ApplyChoiceColor` 커스텀 함수로 통합. `FLinearColor`(함수 인자)와 `FSlateColor`(`Set Color and Opacity` 입력) 타입이 자동 변환되지 않아 `Make Slate Color`로 한 번 거쳐야 했음.
+
+### Failure Transition 연출 확장
+- 최초 합의했던 "Fade Out + 텍스트 오버레이" 수준에서, 참고 이미지(9단계 Death Sequence 스토리보드)를 반영해 연출을 확장하기로 재합의. 실제 로딩 없이 카메라 페이드/타이머만으로 아래 흐름을 구현:
+  - `RespawnAtLastCheckpoint()`: 입력 차단 → `SparkComponent::SpawnSparkLight`로 사망 위치에 마지막 스파크(임시 조명) 발광 → Fade Out 시작 → `FailureFadeOutDuration` 경과 후 `ShowFailureMessageAndWait()` 호출.
+  - `ShowFailureMessageAndWait()`(신규): 화면이 완전히 어두워진 뒤 안내 문구 위젯을 노출하고, `FailureMessageDuration`(연출용 가짜 대기, 1.2초)만큼 대기 후 `TeleportToCheckpointAndFadeIn()` 호출.
+  - `TeleportToCheckpointAndFadeIn()`: 기존과 동일하게 텔레포트 → Fade In → 문구 숨김 → 입력 복구.
+- `WBP_FailureMessage`에 "SYSTEM"/"UNIT OFFLINE"(C++에서 텍스트 주입) → "RESTORING FROM CHECKPOINT..." + Progress Bar 채움으로 이어지는 Widget Animation을 구성, `FailureMessageDuration`과 애니메이션 길이를 맞춤.
+- 파티클 이펙트는 새로 만들지 않고, 착지/슬라이드 Spark에 쓰던 `USparkComponent::SpawnSparkLight(Location, Intensity, Radius, Duration)`을 그대로 재사용해 "마지막 스파크로 주변이 잠깐 드러났다 꺼지는" 연출을 대체 구현 — 신규 에셋 제작 없이 스토리보드의 "마지막 Spark/주변 노출/빛의 소멸" 3단계를 카메라 Fade와 겹쳐서 표현.
+
+### 버그/이슈 및 수정
+- `USparkFailureMessageWidget::HideMessage()`가 `BP_OnHideMessage()`만 호출하고 실제 `Visibility`를 바꾸지 않아, Blueprint에 애니메이션을 구현하기 전까지는 문구가 사라지지 않는 문제 발생 — `ShowMessage()`와 대칭이 되도록 C++에서 `SetVisibility(Collapsed)`를 직접 호출하도록 수정.
+- UMG Progress Bar의 `Percent`는 0.0~1.0 범위인데 애니메이션 끝 키프레임 값을 100으로 넣어 값이 범위를 벗어나 순식간에 꽉 차 보이는 문제 발생 — 끝 키프레임을 1.0으로 수정, 키프레임 보간(Interpolation)을 Linear/Auto로 맞춰 부드럽게 채워지도록 조정.
+- `FailureMessage` 기본값을 한글("신호 손실")로 뒀더니 Barlow Condensed/IBM Plex Mono(영문 전용 폰트)가 한글 글리프를 담고 있지 않아 문자가 깨짐(tofu) — 프로젝트가 전체 영문 텍스트 기조라 기본값을 "UNIT OFFLINE"으로 교체.
+
+### 결과
+- SPARK-54 스코프(Resume/Restart/Quit Game 실동작, Settings/Controls/Main Menu 비활성 배치, Failure Transition 확장 연출)를 PIE에서 전체 흐름 확인 완료.
+
+---
+
+## 2026-09-21 — 로봇 로코모션 Root Motion 전환 및 Turn In Place 구현 (진행 중, 미해결 버그 있음)
+
+### 문제 발견
+- 리타겟된 로봇 Walk/Run 애니메이션을 캐릭터에 연결하면, Root Motion을 켜지 않았는데도 캐릭터가 제자리에서 이동 입력 없이 마음대로 앞으로 걸어나가는 현상 발생. Blend Space에 넣고 실제로 이동시키면 캡슐 위치보다 메시가 훨씬 앞서 나가는 불일치로 확대됨.
+- 근본 원인: 이 로봇 리그는 실제 이동/회전 데이터가 스켈레톤의 진짜 root 본(인덱스 0)이 아니라 **pelvis 본**에 있음. 언리얼의 `Force Root Lock`, 내장 `ZeroOutRootBoneModifier`, `Enable Root Motion`은 전부 root 본(인덱스 0)만 읽고 쓰도록 설계되어 있어, 이 리그에서는 전부 조용히 아무 효과가 없었음 — 이 사실을 확인하기까지 여러 차례 잘못된 진단(Root Motion 활성화 여부, IK Retargeter Chain Mapping, IK Goal 위치 등)을 거쳤음.
+
+### 조치
+- **에디터 전용 신규 모듈 `SparkEditor` 추가**(`Source/SparkEditor/`, Type: Editor) — `AnimationModifiers`/`AnimationModifierLibrary`/`AnimationBlueprintLibrary`에 의존하는 커스텀 Animation Modifier는 패키징 빌드에 링크되면 안 되므로 Runtime `Spark` 모듈과 분리.
+- `UAnimModifier_BakeRootMotionFromBone`(신규): 지정한 본(pelvis)의 수평 이동(X/Y)과 회전(쿼터니언 전체)을 root 본으로 옮겨 담고, 원본 본에서는 그만큼 빼서 시각적 포즈는 그대로 유지하면서 이동/회전의 "주체"만 root로 이전. 시행착오 끝에 회전은 Euler(Rotator)의 Yaw 성분만 뽑는 방식이 실패해(아래 참고) 쿼터니언 전체를 옮기는 방식으로 확정.
+- `ASparkCharacter::BeginPlay()`에서 `AnimInstance->SetRootMotionMode(RootMotionFromEverything)` 설정, `Move()`에서 카메라 기준 이동 입력 + `bOrientRotationToMovement`를 끄고 대신 입력 방향(`DesiredFacingDirection`)을 직접 저장해 `Tick()`에서 캐릭터를 회전시키는 방식으로 전환 (Root Motion 하에서는 Velocity가 항상 캐릭터 정면과 같아져 회전 기준으로 못 씀).
+- `UAnimNotify_FootstepSpark`(신규, Runtime `Spark` 모듈): Sprint 발소리 스파크를 기존 0.28초 타이머 근사 방식에서 애니메이션의 실제 발 착지 프레임에 정확히 동기화하는 방식으로 교체.
+- Idle/Walk/Run/Sprint 4단계 로코모션 Blend Space 완성. `Ground Speed` 입력을 실제 측정 Velocity 대신 "의도된 속도"(`GetLastMovementInputVector()` 기반)로 바꿔 Root Motion 피드백 루프로 인한 떨림 문제 해결.
+- Turn In Place(정지 상태 급회전) 1단계 구현: `TurnInPlaceLeft`/`Right` Montage 배열(45/90/135/180도) 중 가장 가까운 각도 선택, 캡슐 회전은 Root Motion이 아니라 Montage 재생 길이에 맞춰 `Tick()`에서 직접 보간(각도 wraparound 버그를 피하기 위해 선택된 버킷의 정확한 각도/부호를 그대로 사용, `NormalizeAxis` 재계산 지양).
+
+### 트러블슈팅 이력 (실패한 시도 포함)
+- IK Retargeter의 `Speed Planting`, Root Chain 설정, `Auto Align` 등을 의심했으나 전부 원인이 아니었음.
+- `ik_foot_l/r` 등 가상 본이 리타겟 후 허공에 뜬 것을 발견해 흔들림의 원인으로 의심했으나, `ABP_SparkCharacter`가 해당 본을 전혀 참조하지 않아 무관한 것으로 확인.
+- Turn In Place 회전을 `PlaySlotAnimationAsDynamicMontage`(즉석 재생)로 먼저 구현했으나 재현성 없는 버그 발생 → 실제 `AnimMontage` 에셋(`PlayAnimMontage`)으로 교체했지만 동일 증상 지속 → 결국 원인은 재생 방식이 아니라 애니메이션 자체의 root 본 회전 데이터였음이 밝혀짐.
+- 회전값을 pelvis에서 root로 옮길 때 Rotator의 Yaw 성분만 추출하는 방식 시도 → 이 리그는 본의 로컬 축 자체가 일반적인 Z=Yaw 관례를 따르지 않아(Reference 회전이 90/90/90 근처) 완전히 실패, root 본 회전이 항상 0으로 남음. 쿼터니언 전체를 옮기는 방식으로 교체했으나, 이번엔 pelvis의 Pitch/Roll(자연스러운 몸 기울임)까지 캡슐에 그대로 적용되어 캐릭터가 옆으로 눕는 새 버그 발생.
+- 최종적으로 "Root Motion 회전 자체를 쓰지 않고, 애니메이션은 시각 효과만 담당하며 캡슐 회전은 C++이 직접 보간" 방식으로 전환. `FMath::Lerp(FRotator, FRotator, Alpha)`가 최단 경로를 보장하지 않아 발생한 오버슈트, `FRotator::NormalizeAxis(-180)`이 `+180`으로 정규화되며 180도 경계에서 회전 방향이 뒤집히는 버그를 순차적으로 발견/수정.
+
+### Known Issues (미해결 → 2026-09-22에 해결, 아래 참고)
+- 위 수정들을 모두 적용한 뒤에도 Turn In Place 회전 시 "의도한 방향으로 돌았다가 순간적으로 원래 방향으로 돌아간 뒤 다시 도는" 현상이 재현됨. 디버그 오버레이(`ActorYaw`/`bTurning`/`Start`/`Target`/`Elapsed`/`Dur`)로 다수 재현했으나 아직 근본 원인 미확정. 다음 세션에서 이어서 진단 필요.
+- 디버그용 `GEngine->AddOnScreenDebugMessage` 코드가 `SparkCharacter::Tick()`에 임시로 남아있음 — 원인 해결 후 제거 필요.
+- **(2026-09-22 정정)**: 근본 원인과 해결 과정은 `## 2026-09-22 — Turn In Place "돌았다가 원래 방향으로 되돌아가는" 버그 근본 해결` 항목 참고. 디버그 오버레이 코드도 제거됨.
+
+### 다음 작업
+- Turn In Place 잔여 버그 원인 규명 및 수정.
+- 2단계: 이동 중 방향 전환(Pivot Turn, 왼발/오른발 리딩 애니메이션 활용) 구현.
+- Sprint/Run용 `AnimModifier_BakeRootMotionFromBone` 재적용 전수 검증(예전 잘못된 로직으로 이미 적용된 에셋이 섞여있을 수 있음 — Revert 미구현으로 완전히 새로 리타겟한 원본에만 재적용 권장).
+
+---
+
+## 2026-09-22 — Turn In Place "돌았다가 원래 방향으로 되돌아가는" 버그 근본 해결
+
+**Category:** Bugfix
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 2026-09-21에 미해결로 남긴 Turn In Place 회전 버그("의도한 방향으로 돌았다가 순간적으로 원래 방향으로 돌아간 뒤 다시 도는 현상") 원인 규명 및 수정.
+
+### 작업 내용
+
+- `AnimModifier_BakeRootMotionFromBone`에 `bYawOnlyRotation` 옵션 추가: source 본(pelvis)의 world-space 회전에서 "Z축 기준으로 얼마나 돌았는지"(Yaw)만 `SourceQuat.RotateVector(ForwardVector)`를 수평면에 투영해 뽑아 root 본으로 옮기고, 나머지(pitch/roll/트위스트)는 `FTransform::GetRelativeTransform`으로 정확히 계산한 residual을 그대로 source에 남긴다. `Root(Yaw) * Residual = 원본 SourceQuat`이 항상 성립해 시각적 포즈는 원본과 동일하게 유지되면서, root 본만 봐도 실제 회전량을 알 수 있게 됨.
+- 같은 모디파이어에 0프레임 기준값 보정 추가: 이 리그는 Bind Pose 자체가 회전되어 있어 0프레임의 절대 Yaw가 0이 아닐 수 있음 — 이 상태로 Root Motion을 쓰면 몽타주 재생 첫 틱에 "이전 상태(0) → 0프레임 절대값"으로 순간 점프하는 델타가 적용됨. 0프레임 값을 모든 프레임에서 빼서 root 회전이 항상 0프레임에 정확히 Identity로 시작하도록 수정.
+- `bYawOnlyRotation`일 때는 pelvis에 남아있는 미세한 스텝(체중 이동) 이동을 root로 옮기지 않고 버림(제자리 회전이므로 순 이동량이 0이어야 함).
+- Turn In Place 8개 애니메이션(45/90/135/180도 좌우)에 위 모디파이어를 `bYawOnlyRotation` 켜서 적용, 해당 몽타주들의 Enable Root Motion을 다시 켬.
+- `SparkCharacter::Tick()`/`TryPlayTurnInPlace()`에서 캡슐을 C++로 직접 보간/스냅하던 코드를 전부 제거하고, Root Motion이 실시간으로 캡슐을 돌리도록 되돌림. 몽타주 종료 감지는 `FOnMontageEnded` 델리게이트(지연 있음) 대신 매 프레임 `Montage_IsPlaying()`으로 직접 확인.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: Turn In Place 회전 시 목표 방향으로 돌았다가 잠깐 원래 방향으로 돌아간 뒤 다시 목표 방향으로 도는 현상.
+  - **확인된 사실**: 디버그 오버레이(`ActorYaw`/`bTurning`/`Elapsed`/`SnapAt`)를 프레임 단위로(ffmpeg로 60fps 추출) 분석한 결과, 당시 구조(Root Motion 회전을 안 쓰고 C++이 캡슐을 직접 돌리는 방식)에서는 **애니메이션 재생 중 캡슐이 단 한 번도 회전하지 않고 있었다.** 화면상의 회전은 pelvis 애니메이션 혼자 만든 시각적 착시였고, 캡슐(진짜 게임 로직상의 방향)은 재생 내내 원래 각도에 멈춰있었음.
+  - **원인 (확정)**: 애니메이션이 끝나 pelvis의 시각적 기여가 사라지는 순간, "사실은 원래 방향에 멈춰있던" 캡슐의 실제 값이 그제서야 드러남. 이를 즉시 스냅으로 처리하면 1프레임 튐으로, 보간으로 처리하면 눈에 보이는 재회전으로 나타났음 — 여러 증상(즉시 팍 튐, 1.7~1.8배 더 돌았다 되돌아옴, 반시계로 계속 도는 것처럼 보임 등)이 전부 "캡슐과 메쉬가 재생 중 서로 다른 값을 갖고 있다가 끝나는 순간 어긋남이 드러난다"는 동일 원인의 다른 발현이었음.
+  - **해결**: Root Motion으로 되돌아가되, 2026-09-21에 실패했던 두 가지를 이번엔 근본적으로 고친 버전으로 적용. (1) 전체 쿼터니언 대신 Yaw만 추출(pitch/roll leak로 옆으로 눕는 문제 방지), (2) 0프레임 기준값 보정(Bind Pose 회전으로 인한 재생 시작 시 순간 점프 방지). Root Motion이 매 프레임 캡슐을 애니메이션과 실시간으로 동기화하므로, 재생 종료 시점에 "드러날 괴리" 자체가 사라짐.
+
+### 결과
+
+- S/W 키로 반복 회전 테스트(3연속 회전 포함) 시 순간 점프/재회전 현상 사라짐을 사용자가 직접 확인.
+- 남은 것은 Turn→Idle 전환 시의 작은 블렌드 팝 정도로, Montage Blend Out을 0에서 소량(0.15~0.2초)으로 조정해 완화 시도 중 — 아직 "완전히 해결"로 단정하기보다 다음 세션에서 재확인 필요.
+- Sliding 기능은 이번 Root Motion 개편과 무관함을 확인(코드로 `Velocity`를 직접 세팅하는 방식이라 root 본을 전혀 안 씀) — 새로 가져온 슬라이드 시작/종료(Run·Sprint) 애니메이션 3종은 root 본 모디파이어 없이 순수 시각 연출 몽타주로 붙일 예정.
+
+### 다음 작업
+
+- Turn→Idle 블렌드 팝 잔여 여부 재확인.
+- Walk/Run/Sprint에 적용된 `BakeRootMotionFromBone`(전체 쿼터니언 버전)도 필요 시 같은 0프레임 기준값 보정 로직 검토(현재까지 해당 애니메이션들에서는 이 문제로 인한 증상이 보고되지 않았음).
+- 슬라이드 시작/종료 전환 몽타주 3종 연결 (`StartSlide()`/`StopSlide()`에서 재생, ABP Sliding 스테이트 블렌드 타이밍과 함께 조정).
+- 2단계: 이동 중 방향 전환(Pivot Turn) 구현.
+
+---
+
+## 2026-09-22 (2) — 슬라이드 시작/종료 전환 Montage 3종 연결
+
+**Category:** Feature / Bugfix
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 새로 가져온 슬라이드 전환 애니메이션 3종(Start, End-to-Run, End-to-Sprint)을 `StartSlide()`/`StopSlide()`에 연결.
+
+### 작업 내용
+
+- `SparkCharacter`에 `SlideStartMontage`, `SlideEndToRunMontage`, `SlideEndToSprintMontage`, `SlideEndToIdleMontage` 프로퍼티 추가. `StartSlide()`에서 시작 Montage를, `StopSlide()`에서는 이동 입력 여부(`LastMovementInput`)와 `bIsSprinting`으로 Idle/Run/Sprint 중 하나를 골라 재생.
+- `SlideStartMontageSection` 프로퍼티 추가: 시작 Montage에 "달리기→슬라이드" 리드인이 포함돼 있어, Montage Section으로 실제 슬라이드 포즈 시작 지점을 지정해 리드인 구간을 건너뛸 수 있게 함.
+- `AnimModifier_BakeRootMotionFromBone`에 `bDiscardTranslationOnly` 옵션 추가: 회전은 전혀 건드리지 않고 source 본(pelvis)의 X/Y 이동만 0으로 버림. Root Motion을 계속 꺼둔 채 쓰는 애니메이션(슬라이드 전환처럼 이동을 C++ `Velocity`가 전담하는 경우) 전용.
+- `Move()`가 슬라이딩 중 입력을 무시하고 조기 리턴해 이동 입력 해제를 감지할 수 없었던 문제 → `Move()` 진입 시점에 `LastMovementInput`을 먼저 기록하도록 순서 변경, `OnMoveInputReleased()`를 신설해 `IA_Move`의 `Completed` 트리거에 바인딩(`SparkPlayerController.cpp`).
+- Run/Sprint 종료 Montage가 재생 도중 입력이 풀려도 끝까지 재생되던 문제 → `ActiveSlideEndMontage`를 추적해 `Tick()`에서 매 프레임 입력 해제 여부를 확인, 풀리면 `StopAnimMontage()`로 즉시 끊음.
+- Idle 직후 첫 슬라이드에서 `Velocity`가 0이 되는 간헐적 버그 → `Crouch()`의 캡슐 리사이즈 처리로 추정되는 한 틱짜리 리셋을 매 프레임 재적용으로 상쇄(`SlideVelocity`를 저장해두고 `UpdateGroundSparks()`에서 매 틱 다시 강제 적용).
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 슬라이드 시작/종료 Montage를 연결하자 캐릭터가 저 멀리 혼자 날아가거나 땅에 파묻히는 것처럼 보임.
+  - **원인 (확정)**: Root Motion 체크 여부와 무관하게, 이 리그는 실제 이동 데이터가 pelvis에 있음. Root Motion이 꺼져 있어도 root 본은 스켈레톤의 최상위 부모라 그 애니메이션 값이 그대로 포즈에 반영됨 — pelvis에 있든 root로 옮겨놨든, Root Motion으로 "추출·소비"하지 않는 한 화면에서 사라지지 않음. 기존 `BakeRootMotionFromBone`(`bYawOnlyRotation=false`)은 이동을 root로 "옮기기만" 할 뿐 버리지 않아서 문제가 그대로 남아있었음.
+  - **해결**: `bDiscardTranslationOnly` 옵션을 추가해 이동값 자체를 버리도록 함(회전은 원본 그대로 보존).
+- **문제**: 슬라이드 종료 후 손을 떼도 Run/Sprint 애니메이션이 계속 재생되고 Idle로 안 넘어감.
+  - **원인**: (1) 슬라이딩 중엔 `Move()`가 아예 호출을 무시해 입력 해제 시점을 알 방법이 없었음. (2) Full Body Montage는 한 번 재생을 시작하면 자연 종료까지 아무도 끊어주지 않는 한 그대로 재생됨.
+  - **해결**: `OnMoveInputReleased()`를 `IA_Move`의 Completed에 바인딩해 해제 시점을 확보하고, `Tick()`에서 재생 중인 종료 Montage를 감시해 입력이 풀리면 즉시 `StopAnimMontage()`.
+  - 참고: 짧게 한 틱 정도 멈칫하는 잔여 증상은 물리 버그가 아니라 Montage의 Blend In Time 때문(시각적 블렌드 지연)이었음 — 실제 Velocity는 정상.
+
+### 결과
+
+- 슬라이드 시작/종료 전환 애니메이션이 물리 이동과 어긋나지 않고 재생됨을 확인.
+- 슬라이드 종료 후 입력 상태(없음/Run/Sprint)에 따라 올바른 Montage로 분기하고, 도중 입력이 풀리면 즉시 끊기는 것을 확인.
+
+### 다음 작업
+
+- Turn→Idle 블렌드 팝 잔여 여부 재확인 (2026-09-22 (1) 항목에서 이월).
+- Walk/Run/Sprint `BakeRootMotionFromBone`(전체 쿼터니언 버전)의 0프레임 기준값 보정 필요 여부 검토.
+- 2단계: 이동 중 방향 전환(Pivot Turn) 구현.
+
+---
+
+## 2026-09-23 — Turn In Place 완전 삭제, Run/Sprint Pivot Turn 시도 후 보류, Jump 애니메이션 착수
+
+**Category:** Feature / Bugfix
+**Status:** 진행 중
+**Branch:** feature/save-system
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 정지 상태에서 Turn In Place 애니메이션이 재생되는 동안 이동 입력이 완전히 막히는 버그 해결.
+- (방향 전환 중 시도한 대안) Run/Sprint 중 방향 전환 시 재생할 Pivot Turn 애니메이션을 Blend Space로 연결.
+
+### 작업 내용
+
+- Turn In Place 인터럽트를 여러 방식으로 시도(Root Motion 몽타주 중간 `StopAnimMontage`, `AddActorWorldOffset`로 캡슐 직접 이동, 최소 재생 시간 + Blend Out)했으나 매번 새로운 문제가 드러나 `달여우` 판단으로 기능 자체를 폐기. `SparkCharacter.h`/`.cpp`에서 Turn In Place 관련 프로퍼티, 상태 플래그, `TryPlayTurnInPlace()` 함수를 전부 삭제.
+- 대안으로 Run/Sprint 각각 45/90/135/180도 회전 애니메이션을 담은 `BS_PivotTurn_Run`, `BS_PivotTurn_Sprint`(1D Blend Space, Direction -180~180) 제작. `SparkCharacter`에 `DesiredTurnAngle`(BlueprintReadOnly, `Move()`에서 입력 방향과 현재 Actor Yaw의 차이로 매 프레임 계산) 추가해 ABP가 Direction 축 입력으로 사용하도록 노출.
+- ABP AnimGraph를 `Blend Poses by bool` 2단 구성으로 배선: 이동 여부(`Ground Speed > 0`)로 기존 `BS_Robot_Locomotion`(Idle)과 Pivot Turn 결과 중 선택, 그 안에서 다시 `Is Sprinting`으로 Run/Sprint Pivot Turn BS 중 선택.
+- 최종적으로 Pivot Turn 기능 자체를 시간 투자 대비 효율이 낮다고 판단해 보류. C++에 남아있던 `DesiredTurnAngle` 프로퍼티와 계산 코드를 삭제.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: Pivot Turn 애니메이션 연결 후 90도 회전 시 특히 심하게, 캐릭터(스켈레탈 메시)가 캡슐에서 멀리 떨어져 나갔다가 되돌아오는 것처럼 보임.
+  - **확인된 사실**: 영상을 프레임 단위로 캡처해 확인한 결과, 메시가 실제로 캡슐 위치 기준에서 크게 이탈했다가 원위치로 복귀하는 패턴이 반복됨. 회전 거리가 큰 90도 클립일수록 증상이 심함.
+  - **원인 (확정)**: 회전 애니메이션 클립 자체가 "달리며 도는" 모션이라 pelvis 본에 실제 이동값이 baked되어 있음(2026-09-22 로그의 "Root Motion이 꺼져 있어도 root/최상위 본 값은 포즈에 그대로 반영된다" 함정과 동일 계열). Root Motion 추출을 안 쓰므로 캡슐은 그대로지만, 메시의 pelvis가 매 프레임 실제로 이동해 화면상 캡슐과 어긋나 보임.
+  - **해결 시도 1 (실패)**: `Force Root Lock` — 2026-09-21 로그에서 이미 확인했듯 이 리그는 이동 데이터가 진짜 최상단 root 본이 아니라 pelvis에 있어 Force Root Lock이 대상으로 삼는 본과 실제 이동이 있는 본이 달라 무효(silent no-op).
+  - **해결 시도 2 (부분 실패)**: AnimGraph에 `Transform (Modify) Bone`(Pelvis, Translation `Replace Existing` (0,0,0)) 추가 → 좌우/전후 이탈은 사라졌으나, Z(높이)까지 0으로 덮어써서 캐릭터가 바닥에 파묻히는 새 증상 발생. Z만 별도로 유지하려면 애니메이션별 Pelvis 기준 높이를 하드코딩해야 해 비용 대비 효율 낮다고 판단.
+  - **최종 결정**: Pivot Turn 애니메이션 자체를 폐기. Run/Sprint 방향 전환은 기존 `Tick()`의 `RInterpTo`/스냅 회전 로직으로만 처리.
+
+### 결과
+
+- Turn In Place 관련 코드/에셋 참조 완전 제거 확인(`TurnInPlace` grep 결과 없음).
+- Pivot Turn Blend Space(`BS_PivotTurn_Run`, `BS_PivotTurn_Sprint`)는 에셋만 남기고 ABP 배선은 원상 복구 예정(`달여우`가 직접 정리), C++ `DesiredTurnAngle`은 삭제 완료.
+- Jump/Wall Slide/Wall Jump 애니메이션 세트를 최소 구성(JumpStart 공용 1개, Falling Loop 공용 1개, Land Heavy/Light 2개)으로 범위를 좁혀 다음 작업으로 착수하기로 결정, 애니메이션 에셋은 확보 완료.
+
+### 다음 작업
+
+- Jump/Falling/Land 애니메이션을 `Content/Animations/SparkRobot/Jump/` 폴더에 정리하고 Montage/AnimGraph 배선.
+- Turn→Idle 블렌드 팝 잔여 여부 재확인 (2026-09-22 (1) 항목에서 이월, 계속 보류 중).
+- Walk/Run/Sprint `BakeRootMotionFromBone`(전체 쿼터니언 버전)의 0프레임 기준값 보정 필요 여부 검토 (계속 이월).
+
+---
+
+## 2026-09-27 — Jump/Falling/Land 완성, Wall Slide/Wall Jump 상태 머신 구현 (벽점프 착지 회전 동기화는 미해결로 보류)
+
+**Category:** Feature / Bugfix
+**Status:** 부분 완료 (Jump/Falling/Land 완료, Wall Slide/Wall Jump 동작은 완료, 착지 시 캐릭터 회전-애니메이션 동기화는 보류)
+**Branch:** feature/save-system
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- `ABP_SparkCharacter`의 `SM_Locomotion_Jump`에 Jump/Falling/LandLight/LandHeavy 전환을 완성하고, Wall Slide/Wall Jump 상태를 새로 추가한다.
+- 벽점프 착지 시 캐릭터가 실제로 향해야 할 방향과 애니메이션이 시각적으로 어긋나는 문제를 해결한다.
+
+### 작업 내용
+
+- **Falling → Land 등급 분기 재구축**: 삭제된 `HeavyLanding` bool 변수에 연결된 채 남아있던 `NOR` 노드의 미연결 입력 핀이 `false`로 취급되어 `Falling → LandLight`가 항상 무조건 참이 되던 버그를 발견, `LastLandingFallSpeed` 구간 비교로 두 전환을 다시 구성.
+- **착지 순간 Velocity 캐시 도입**: 엔진이 `IsFalling` 플래그가 꺼지는 시점과 거의 동시에 `Velocity.Z`를 0으로 초기화해 ABP가 라이브 Velocity로 Land 등급을 판정할 수 없다는 것을 확인. `Landed()`에서 `Super::Landed()` 호출 전 속도를 `LastLandingFallSpeed`(`UPROPERTY(BlueprintReadOnly)`)에 캐시하고 ABP가 이 값을 읽도록 변경.
+- **저속 착지 탈출 경로 추가**: `Falling → LandLight`/`LandHeavy`만 있고 그 사이 속도(예: Wall Slide의 `-150` 낙하 속도)에 대한 전환이 없어 저속 착지 시 `Falling`에 무한히 머무는 버그를 발견, `Falling → BS_Robot_Locomotion`(`NOT(IsFalling) AND LastLandingFallSpeed >= -1300`) 전환 추가.
+- **Wall Slide/Wall Jump 상태 신규 구현**: `anim_Climb_Idle`(Wall Slide 루프), `Jump_From_Wall_Anim`(Wall Jump 원샷) 임포트 후 상태 2개, 전환 6개(→WallSlide 3방향, WallSlide→WallJump, WallSlide→Falling, WallJump→Falling) 추가. `bIsWallSliding`/`bIsWallJumping` bool을 C++에 노출해 ABP 조건으로 사용. `WallSlide→WallJump`(Priority 0)와 `WallSlide→Falling`(Priority 1) 우선순위를 나눠 `DoWallJump()`가 두 플래그를 동시에 뒤집는 프레임의 경합을 해결.
+- **`WallJump → BS_Robot_Locomotion` 누락 전환 추가**: 착지가 애니메이션 종료보다 먼저 일어나면 `WallJump → Falling`(Time Remaining 기반)만으로는 빠져나갈 곳이 없어 마지막 포즈에 멈추는 버그를 확인, `Jump → BS_Robot_Locomotion` 패턴과 동일하게 `NOT(IsFalling)` 조건의 별도 전환을 추가.
+- **벽점프 착지 회전 동기화 다중 시도** (문제 및 해결 항목 참고, 최종적으로 전부 롤백).
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 벽점프 애니메이션 자체가 "벽을 짚고 뒤로 도는" 모션을 뼈대 포즈(pelvis 로컬 회전)에 내장하고 있어, 재생 중 액터(캡슐)를 실제 방향으로 돌리면 애니메이션의 내장 회전과 이중으로 겹쳐 보임.
+  - **시도 1 (실패)**: 점프 직후 `SetActorRotation` + `DesiredFacingDirection` 동기화로 즉시 반대 방향을 보게 함 → 애니메이션이 이미 반대 방향을 보는 상태로 재생되어 "벽을 짚는" 시작 포즈와 안 맞음.
+  - **시도 2 (부분 성공, 새 버그 유발)**: `Tick()`에서 `bIsWallJumping`인 동안 액터 회전 로직을 건너뛰어 재생 내내 원래 방향을 유지, 착지 시 한 번만 회전 → 애니메이션 자체는 정상화됐으나 `WallJump → BS_Robot_Locomotion` 전환 누락(위 항목)이 이 과정에서 드러남.
+  - **시도 3 (사용자 기각)**: 공중 하강 구간에서만 목표 방향으로 서서히 보간 회전 → "애니메이션 재생 중 캐릭터를 돌리면 애니메이션도 같이 이상해진다"는 지적으로 즉시 폐기. 실제로 재생 중 회전 시 포즈가 깨짐을 확인.
+  - **시도 4 (Root Motion, 실패)**: `Enable Root Motion` 활성화 후 테스트 → 캐릭터가 전혀 움직이지도 회전하지도 않음. Skeleton Tree에서 0/18/38프레임의 `pelvis` 로컬 Rotation을 직접 비교해, 회전이 전용 `root` 본이 아니라 `pelvis`에만 baked되어 있어 Root Motion이 추출할 대상이 없음을 확인(2026-09-21~23 로그의 "root 본 vs pelvis" 함정과 동일 계열).
+  - **시도 5 (Animation Modifier로 Root Motion 재시도, 실패)**: 기존 `UAnimModifier_BakeRootMotionFromBone`(`SourceBoneName = pelvis`, `bYawOnlyRotation = true`)을 적용해 pelvis의 Yaw를 root 본으로 옮기고 Root Motion을 다시 켬 → 이번엔 재생 중 캐릭터가 벽에 붙은 채 전혀 움직이지 않음. 원인은 Root Motion이 켜지는 순간 그 애니메이션 구간의 이동/회전을 애니메이션이 전담하게 되어, `DoWallJump()`의 물리 기반 `LaunchCharacter` 임펄스와 정면으로 충돌(무효화)했기 때문. Root Motion 경로 자체를 포기.
+  - **시도 6 (메쉬-캡슐 회전 분리, 버그로 롤백)**: `Mesh->SetUsingAbsoluteRotation(true)`로 메쉬를 캡슐에서 분리해 재생 중엔 얼리고, 캡슐은 `Move()` 입력을 그대로 따라 자유롭게 회전하게 한 뒤 착지 후 메쉬만 실제 캡슐 방향으로 `QInterpTo` 따라잡기 시도. 구현 과정에서 메쉬 바인드 오프셋(Pitch/Roll이 90도 근처인 리그)을 `GetActorRotation() + MeshBaseRelativeRotation`처럼 `FRotator` 성분별 덧셈으로 합성해, 실제 캡슐 Yaw와 무관하게 항상 고정된 한쪽 방향을 보는 버그 발생. `FRotator` 덧셈은 쿼터니언 곱과 다른 연산이라 회전 합성에 쓰면 안 된다는, `AnimModifier_BakeRootMotionFromBone` 코드 주석에 이미 명시돼 있던 함정을 그대로 재현함.
+  - **최종 결정**: 착지 시 강제 회전 보정 코드를 전부 제거하고 롤백. 착지 후 캐릭터 방향은 순수하게 `Move()`의 입력 기반 회전 로직에만 맡기기로 하고, 벽점프 회전-애니메이션 동기화는 다음 세션으로 이월.
+
+### 결과
+
+- Jump/Falling/LandLight/LandHeavy 전환 로직은 모든 낙하 속도 구간에서 정상 동작 확인(`제대로 진행된다 이제`, `전부 잘 되네`).
+- Wall Slide/Wall Jump 상태 머신(진입/탈출/우선순위)은 정상 동작 확인. Wall Jump 착지 후 캐릭터 회전은 현재 애니메이션이 의도한 방향과 무관하게 순수 입력 기반으로만 결정됨(의도적 현재 상태, 미해결 아님).
+- 알려진 잔여 이슈: (1) Wall Slide 애니메이션이 벽 안으로 파고드는 시각 문제(`WallTraceDistance` 60cm와 `anim_Climb_Idle`에 baked된 손 뻗는 거리 불일치로 추정, 조사 미착수), (2) 벽점프 착지 시 캐릭터(메쉬) 방향과 실제 진행 방향의 시각적 불일치(위 트러블슈팅 참고, 근본 해결 방법 미확정).
+
+### 다음 작업
+
+- Wall Slide 애니메이션 벽 파묻힘 문제 조사(`WallTraceDistance` 조정 또는 진입 시 위치 오프셋).
+- 벽점프 착지 회전-애니메이션 동기화: 메쉬-캡슐 분리 방식을 쿼터니언 합성(`GetRelativeTransform` 또는 `FQuat` 곱)으로 다시 시도할지, 아니면 강제 보정 없이 현재 상태를 최종안으로 확정할지 결정 필요.
+
+---
+
+## 2026-10-07 — 벽점프 회전 동기화를 애니메이션 에셋 레벨에서 해결, Land/Slide/Falling 전환 보강 후 애니메이션 폴리싱 작업 종료
+
+**Category:** Bugfix / Tooling
+**Status:** 부분 완료 (벽점프 회전 동기화 해결, Land/Slide/Falling 전환 다수 보강, 일부 세부 폴리싱은 시간 소진으로 중단)
+**Branch:** feature/save-system
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- 2026-09-27에 이월된 벽점프 착지 회전-애니메이션 동기화 문제를 해결한다.
+- Wall Slide 벽 파묻힘, Land 애니메이션 끊김, Slide 중 낙하 등 플레이테스트로 드러난 잔여 전환 버그를 보강한다.
+
+### 작업 내용
+
+- **`UAnimModifier_RemoveBoneDrift` 신규 작성** (`Source/SparkEditor/AnimModifier_RemoveBoneDrift.h/.cpp`): 지정한 본(pelvis)이 클립 시작~끝 사이에 쌓는 순 회전/수평 이동(드리프트)을 프레임 비율만큼 역보정해서 제거하고, 중간의 상대적 반동/기울임은 그대로 보존. 포즈 절대 방향이 캡슐 정면과 일정하게 어긋난 경우를 위한 `ConstantYawOffsetDegrees` 상수 보정도 추가.
+- **벽점프 회전 처리 단순화**: 애니메이션이 더 이상 방향을 주장하지 않으므로, `DoWallJump()`에서 복잡한 보정 없이 즉시 `SetActorRotation` + `DesiredFacingDirection` 동기화만으로 충분해짐.
+- **Wall Slide 벽 파묻힘 수정**: `WallSlideDesiredSurfaceDistance`(기본 10cm) 추가. `CheckWallSlide()`에서 감지된 벽까지의 실제 거리가 이보다 가까우면 `AddActorWorldOffset`으로 벽 노멀 방향으로 밀어내 애니메이션 리치 거리와 맞춤.
+- **Land 애니메이션 중간 끊기**: Light/Heavy 착지 시 `LightLandingRecoveryDuration`(0.15s)/`HeavyLandingRecoveryDuration`(0.4s) 동안 `Move()`가 이동 입력을 무시하는 `LandingRecoveryEndTime`을 추가해 착지 애니메이션이 일정 시간 보장되게 하고, ABP의 Land→Locomotion 전환 규칙에는 `Speed > 임계값` 조건을 OR로 추가해 입력 해제 즉시 끊기도록 안내(에디터 작업은 사용자 처리).
+- **Slide 중 낙하 시 Falling 미전환 문제**: Slide/SlideEnd(Idle/Run/Sprint)가 전부 몽타주 기반이라 State Machine의 `Movement Mode == Falling` 전환이 걸려도 몽타주가 끝날 때까지 화면에 반영 안 되는 구조적 문제를 확인. `StopSlide(bool bPlayEndMontage)`로 종료 몽타주 생략 분기를 추가하고, `Tick()`에서 `bIsSliding && IsFalling()`이면 `StopSlide(false)` + `Montage_Stop(0.0f)`로 즉시 끊음. SlideEnd 몽타주 재생 중 낙하하는 경우도 `ActiveSlideEndMontage`/`bActiveSlideEndMontageCutsOnInputRelease`로 동일하게 커버.
+- **걷기/슬라이드 중 낙하가 Jump 거치지 않고 Falling으로 직행하는 문제**: ABP `BS_Robot_Locomotion`(Idle/Run/Sprint 단일 Blend Space 상태)에 `Movement Mode == Falling` 전환을 추가해 해결. 단, 이 조건만으로는 땅에서 점프할 때도 곧바로 Falling으로 가 Jump 상태를 건너뛰는 부작용이 발생해, `Velocity.Z < 0.0`을 AND로 추가해 "위로 솟구치는 점프"와 "발밑이 끊겨 떨어지는 것"을 구분하도록 수정(에디터 작업, 최종 반영 여부는 다음 세션에서 재확인 필요).
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 벽점프 애니메이션 재생 중 좌측을 바라보며 진행되다가, 애니메이션이 끝나고 Falling/Locomotion으로 바뀌는 순간에만 올바른(벽 반대편) 방향을 보여줌.
+  - **확인된 사실**: 드리프트 제거(시작=끝 보정)만 적용한 상태에서도 증상이 재현됨.
+  - **원인 (확정)**: 드리프트 제거는 "시작과 끝이 같아지게" 만들 뿐, pelvis 포즈의 절대 방향 자체가 캡슐 정면 기준으로 상수만큼(약 90도) 틀어져 있는 문제는 해결하지 못함. Falling/Locomotion으로 전환된 뒤에는 포즈가 캡슐의 실제 `SetActorRotation` 값을 그대로 반영해 정상으로 보임.
+  - **해결**: `ConstantYawOffsetDegrees`를 추가해 모든 프레임에 동일한 상수 보정을 더해 pelvis 포즈 절대 방향을 캡슐 정면과 일치시킴.
+- **문제**: Slide 중 낙하 감지 후 `Montage_Stop(0.0f)`을 호출해도 Falling으로 안 넘어가고 Slide/SlideEnd 애니메이션이 끝까지 재생됨.
+  - **확인된 사실**: `StopSlide(false)`의 낙하 감지 체크(`bIsSliding && IsFalling()`)는 Slide 몽타주 재생 구간에만 걸림.
+  - **원인 (확정)**: SlideEnd(Idle/Run/Sprint) 몽타주는 `StopSlide()`가 이미 `bIsSliding = false`로 바꾼 뒤에 재생되는 별도 구간이라, 저 체크 조건 자체가 성립하지 않음.
+  - **해결**: 기존에 입력 해제 감지용으로 있던 `ActiveSlideEndMontage` 추적을 Idle 몽타주까지 포함해 항상 추적하도록 확장하고, 그 체크에 `IsFalling()` 조건을 추가.
+- **문제**: `BS_Robot_Locomotion → Falling` 전환(`Movement Mode == Falling`) 추가 후, 땅에서 Jump 키를 눌러도 Jump 상태를 건너뛰고 곧장 Falling으로 전환됨.
+  - **확인된 사실**: 점프 입력 시에도 MovementMode가 즉시 Falling으로 바뀌므로 해당 전환 규칙이 그대로 걸림.
+  - **원인 (확정)**: 위로 솟구치는 점프와 발밑이 끊겨 떨어지는 것을 `Movement Mode` 하나만으로는 구분할 수 없음.
+  - **해결**: `Velocity.Z < 0.0`을 AND 조건으로 추가해 하강 중일 때만 직결 전환이 걸리게 함.
+
+### 결과
+
+- 벽점프 착지 회전-애니메이션 동기화 문제는 코드가 아니라 애니메이션 에셋(`Jump_From_Wall_Anim`)의 pelvis 드리프트/상수 오프셋을 직접 제거하는 방식으로 최종 해결.
+- Wall Slide 벽 파묻힘, Land 중간 끊기, Slide/SlideEnd 중 낙하, 걷기 중 낙하(Jump 미경유) 전환이 모두 보강됨.
+- 사용자가 전체 작업 과정을 "애니메이션 때문에 시간이 과도하게 소진됐다"고 판단해, 남은 세부 폴리싱(아래 알려진 문제)은 추가 조사 없이 여기서 종료하기로 결정.
+
+### 알려진 문제
+
+- 땅에서 점프 시 Jump 상태를 건너뛰는 문제의 `Velocity.Z < 0.0` AND 조건 수정이 최종적으로 에디터에 반영·검증됐는지 불확실.
+- `ConstantYawOffsetDegrees` 최종 값(90도로 시도)이 정확히 맞춰졌는지 불확실.
+- 그 외 미세한 블렌드 튐 등 "깔끔하지 않은" 디테일은 구체적으로 조사하지 않고 종료.
+
+### 다음 작업
+
+- (보류) 위 알려진 문제 항목들은 재작업 필요 시에만 다시 착수. 현재는 애니메이션 폴리싱을 종료하고 다른 작업(세이브 시스템 등)으로 전환.
+
+---
+
 # Daily Log Template
 
 
@@ -3100,74 +3428,6 @@ Spark의 Development Log는 다음 규칙을 따른다.
 - 다음 작업을 구체적인 실행 단위로 작성한다.
 - Release 전에 미해결 로그와 Known Issues를 검토한다.
 - 민감한 정보와 로컬 경로는 공개 문서에 기록하지 않는다.
-
-## 2026-09-17 — Saving Indicator UI 구현 (SPARK-55)
-
-### 확인된 사실
-- 기존 `SaveGameData`는 동기 `SaveGameToSlot`을 사용해 저장이 즉시 완료되어, "저장 중" 상태를 UI로 표시할 시간적 여유 자체가 없었음.
-- `UGameplayStatics::AsyncSaveGameToSlot` + `FAsyncSaveGameToSlotDelegate`로 전환해 저장 시작/완료를 각각 브로드캐스트하는 정적 델리게이트(`OnSaveStartedGlobal`, `OnSaveCompletedGlobal`)를 `USparkSaveSubsystem`에 추가. `ASparkCheckpoint::OnCheckpointActivatedGlobal`과 동일한 패턴이라 UI 위젯이 GameInstance 서브시스템을 조회하지 않고도 `NativeConstruct()`에서 바로 바인딩 가능.
-- `USparkSavingIndicatorWidget`(신규)이 두 델리게이트를 바인딩해 상태 텍스트("저장 중...", "저장 완료", "저장 실패")를 갱신하고, `BP_OnShowSaving`/`BP_OnSaveFinished(bool)` BlueprintImplementableEvent로 WBP 쪽 애니메이션을 트리거. `SparkCheckpointNoticeWidget`과 동일한 UI 배선 패턴(뷰포트에 `SparkPlayerController::BeginPlay()`에서 생성).
-- `06_UI_UX.md`의 Gameplay HUD 와이어프레임에 "저장 중..."이 화면 좌하단으로 명시되어 있어, WBP의 `Horizontal Box`를 Canvas Slot Anchor 0.0/1.0, Alignment 0.0/1.0로 배치.
-- 실기기 테스트에서 스피너 이미지가 회전하지 않는 것처럼 보인 문제 발생. 원인은 저장이 매우 빠르게(파일 크기가 작아 거의 즉시) 끝나 스피너가 육안으로 체감할 만큼 돌기 전에 `Stop Animation`이 호출된 것 — 애니메이션 자체의 버그가 아니었음.
-
-### 조치
-- `BP_OnSaveFinished`에서 `Stop Animation` 직후 `SpinnerImage`를 `Collapsed`로 감춰 정지된 스피너가 노출되지 않도록 하고, `BP_OnShowSaving`에서 다시 `Visible`로 되돌려 다음 저장 주기에 대비.
-- `ASparkCheckpoint::ActivateCheckpoint`는 저장 결과를 기다리지 않고 항상 `true`를 반환하도록 변경(저장 성공 여부는 UI 델리게이트로 별도 통지되므로 체크포인트 활성화 자체의 성패와 분리).
-
-### 결과 및 다음 작업
-- Saving Indicator UI 배치부터 표시/사라짐까지 사용자 확인 완료("잘 되네").
-- 다음 단계: SPARK-54(Pause Menu + Failure Transition) 착수.
-
-## 2026-09-17 (2) — Pause Menu + Failure Transition C++ 구현 및 UI 에셋 제작 착수 (SPARK-54)
-
-### 확인된 사실
-- 착수 전 조사 결과, Failure/Respawn 로직(`SparkHazardZone → FellOutOfWorld → RespawnAtLastCheckpoint`)은 이미 있었으나 `06_UI_UX.md` 스펙 대비 "Input Disabled"와 "Fade Out" 구간, Failure Message UI가 빠져 있었음. Pause 관련 코드(입력 액션, `SetGamePaused`, Input Mode 전환, 위젯)는 전혀 없었음.
-- Main Menu 레벨/위젯이 프로젝트에 아예 없어 "Return to Main Menu" 항목이 갈 곳이 없는 상태. 로드맵상 Main Menu는 Pause Menu보다 나중 항목이라, 이번 스코프에서는 Resume/Restart from Checkpoint/Quit Game만 실동작으로 구현하고 Settings/Controls/Return to Main Menu는 비활성화 버튼으로만 배치하기로 결정.
-
-### 구현 내용
-- `SparkCharacter::RespawnAtLastCheckpoint()`를 `DisableInput → 실패 문구 노출 → Fade Out(0.4초) → 텔레포트 → Fade In(2초) → EnableInput` 흐름으로 재구성. 텔레포트 이후 로직은 `TeleportToCheckpointAndFadeIn()`으로 분리하고 `FTimerHandle` 두 개(Fade Out 종료, Fade In 종료)로 연결.
-- `USparkFailureMessageWidget`(신규), `USparkPauseMenuWidget`(신규) 작성. 기존 `SparkSavingIndicatorWidget`과 동일하게 `BlueprintImplementableEvent`로 애니메이션은 Blueprint에 위임.
-- `SparkPlayerController`에 `PauseAction`, `SetPauseMenuVisible()`(`UGameplayStatics::SetGamePaused` + `FInputModeGameAndUI`/`FInputModeGameOnly` 전환) 추가. Pause 입력 바인딩은 다른 액션들과 동일하게 `OnPossess()`에 위치시킴 — `OnUnPossess()`에서 `ClearActionBindings()`가 전체 바인딩을 지우기 때문에, `BeginPlay()`에 한 번만 바인딩하면 재빙의 시 Pause가 죽는 버그가 생김을 미리 인지하고 피함.
-
-### 컴파일 오류 및 수정
-- `UGameplayStatics::QuitGame`은 실제로 존재하지 않는 함수였음(엔진 버전 착각) — `UKismetSystemLibrary::QuitGame`으로 교체.
-- `FInputModeGameAndUI::SetWidgetToFocus`에 위젯이 없을 때 `nullptr`을 전달하려 한 것이 `TSharedRef<SWidget>` 타입 오류로 이어짐 — 위젯이 존재할 때만 `SetWidgetToFocus`를 호출하도록 분기 처리.
-
-### UI 에셋 제작 (진행 중)
-- ChatGPT로 버튼 배경 이미지를 반복 제작. 1차 시안은 네온이 과하게 밝고 매끈해 "낡은 공장" 톤과 어긋나 재요청, 2차 시안(녹/마모 텍스처 강화)은 채택. Hover용 네온 강조 버전을 만들 때 매번 이미지 전체가 다시 그려져 베이스 텍스처(녹 위치, 다이아몬드 패턴 등)가 미묘하게 달라지는 문제를 발견 — AI 이미지 생성은 "편집"이 아니라 "재생성"이라는 한계를 재확인.
-- 받은 이미지의 배경이 알파 채널상으로는 RGBA였지만 알파 값이 전부 255(완전 불투명)라 실질적으로 검은 배경이 그대로 박혀 있었음 — PIL로 `getchannel('A').getextrema()`를 찍어서 확인. 육안으로는 투명처럼 보여도 실제 알파 값 검증이 필요함.
-- 원본 버튼 이미지 비율(약 2.5:1)이 실제 메뉴에 필요한 슬림한 버튼 비율(약 6.5:1)과 크게 달라, Nine-Slice(Box) 브러시로도 모서리 디자인이 겹치거나 눌려 보일 것으로 판단 — 이미지 자체를 목표 비율로 재요청하기로 결정.
-- Barlow Condensed SemiBold(메뉴/버튼/상호작용용), IBM Plex Mono Regular(SYSTEM/상태/기계 출력용) 폰트를 프로젝트에 반입, `Content/Spark/UI/Fonts/`에 배치.
-
-### 다음 작업
-- 비율 재조정된 버튼 이미지로 `WBP_PauseMenu` 버튼 스타일 완성, 라벨/폰트 적용.
-- `WBP_FailureMessage`, `IA_Pause` 매핑, `BP_SparkPlayerController` 프로퍼티 연결.
-- 확인 다이얼로그 배선 및 PIE 전체 흐름(Pause 진입/해제, Restart 확인, Failure Fade) 테스트.
-
-## 2026-09-18 — Pause Menu UI 완성 및 Failure Transition 연출 마무리 (SPARK-54 완료)
-
-### Pause Menu UI 완성
-- `WBP_PauseMenu`에 재조정된 비율의 버튼 이미지(Normal/Hover)를 적용하고 Barlow Condensed 폰트로 6개 버튼(Resume/Restart/Setting/Controls/Main Menu/Quit Game) 라벨링 완료.
-- 버튼에 별도 배경 이미지가 없을 때 UMG 기본 Focus Brush(사각 아웃라인)와 기본 Pressed Brush(회색 박스)가 그대로 노출되는 문제를 발견 — Style의 Outline Corner/Width를 0으로, Pressed Brush를 None으로 제거해 해결. Pressed 시 콘텐츠가 미세하게 밀리는 현상은 브러시 문제가 아니라 Style의 `Normal Padding`과 `Pressed Padding` 값이 서로 달라서였음 — 두 값을 동일하게 맞춰 해결.
-- "SYSTEM" 스타일 Restart 확인 다이얼로그를 UMG 네이티브 위젯만으로 구현(별도 이미지 추가 생성 없이 Border/Text/Horizontal Box 조합). SYSTEM 라벨 옆 가로선은 Border를 Horizontal Box Slot에서 Fill(1)로 채워 텍스트/패널 폭에 관계없이 자동으로 늘어나도록 처리.
-- 확인 다이얼로그를 버튼 목록과 같은 Vertical Box의 형제로 배치했더니 목록 레이아웃 자체가 밀리는 문제 발생 — Vertical Box(버튼 목록)와 다이얼로그를 별도 Overlay 레이어로 분리해 해결. 확인 다이얼로그가 뜰 때 뒤쪽 버튼이 그대로 보이는 게 어색해, `BP_ShowRestartConfirm`/`BP_HideRestartConfirm`에서 버튼 목록 Visibility를 Hidden/Visible로 같이 토글하도록 배선.
-- YES/NO 버튼 Hover/Pressed 색상 전환을 매번 개별 노드로 반복하지 않도록, 대괄호 2개 + 라벨 텍스트 + 밑줄 Border를 한 번에 색칠하는 `ApplyChoiceColor` 커스텀 함수로 통합. `FLinearColor`(함수 인자)와 `FSlateColor`(`Set Color and Opacity` 입력) 타입이 자동 변환되지 않아 `Make Slate Color`로 한 번 거쳐야 했음.
-
-### Failure Transition 연출 확장
-- 최초 합의했던 "Fade Out + 텍스트 오버레이" 수준에서, 참고 이미지(9단계 Death Sequence 스토리보드)를 반영해 연출을 확장하기로 재합의. 실제 로딩 없이 카메라 페이드/타이머만으로 아래 흐름을 구현:
-  - `RespawnAtLastCheckpoint()`: 입력 차단 → `SparkComponent::SpawnSparkLight`로 사망 위치에 마지막 스파크(임시 조명) 발광 → Fade Out 시작 → `FailureFadeOutDuration` 경과 후 `ShowFailureMessageAndWait()` 호출.
-  - `ShowFailureMessageAndWait()`(신규): 화면이 완전히 어두워진 뒤 안내 문구 위젯을 노출하고, `FailureMessageDuration`(연출용 가짜 대기, 1.2초)만큼 대기 후 `TeleportToCheckpointAndFadeIn()` 호출.
-  - `TeleportToCheckpointAndFadeIn()`: 기존과 동일하게 텔레포트 → Fade In → 문구 숨김 → 입력 복구.
-- `WBP_FailureMessage`에 "SYSTEM"/"UNIT OFFLINE"(C++에서 텍스트 주입) → "RESTORING FROM CHECKPOINT..." + Progress Bar 채움으로 이어지는 Widget Animation을 구성, `FailureMessageDuration`과 애니메이션 길이를 맞춤.
-- 파티클 이펙트는 새로 만들지 않고, 착지/슬라이드 Spark에 쓰던 `USparkComponent::SpawnSparkLight(Location, Intensity, Radius, Duration)`을 그대로 재사용해 "마지막 스파크로 주변이 잠깐 드러났다 꺼지는" 연출을 대체 구현 — 신규 에셋 제작 없이 스토리보드의 "마지막 Spark/주변 노출/빛의 소멸" 3단계를 카메라 Fade와 겹쳐서 표현.
-
-### 버그/이슈 및 수정
-- `USparkFailureMessageWidget::HideMessage()`가 `BP_OnHideMessage()`만 호출하고 실제 `Visibility`를 바꾸지 않아, Blueprint에 애니메이션을 구현하기 전까지는 문구가 사라지지 않는 문제 발생 — `ShowMessage()`와 대칭이 되도록 C++에서 `SetVisibility(Collapsed)`를 직접 호출하도록 수정.
-- UMG Progress Bar의 `Percent`는 0.0~1.0 범위인데 애니메이션 끝 키프레임 값을 100으로 넣어 값이 범위를 벗어나 순식간에 꽉 차 보이는 문제 발생 — 끝 키프레임을 1.0으로 수정, 키프레임 보간(Interpolation)을 Linear/Auto로 맞춰 부드럽게 채워지도록 조정.
-- `FailureMessage` 기본값을 한글("신호 손실")로 뒀더니 Barlow Condensed/IBM Plex Mono(영문 전용 폰트)가 한글 글리프를 담고 있지 않아 문자가 깨짐(tofu) — 프로젝트가 전체 영문 텍스트 기조라 기본값을 "UNIT OFFLINE"으로 교체.
-
-### 결과
-- SPARK-54 스코프(Resume/Restart/Quit Game 실동작, Settings/Controls/Main Menu 비활성 배치, Failure Transition 확장 연출)를 PIE에서 전체 흐름 확인 완료.
 
 ---
 

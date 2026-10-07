@@ -12,6 +12,11 @@
 				"Engine",
 				"UMG"
 			]
+		},
+		{
+			"Name": "SparkEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [

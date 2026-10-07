@@ -12,6 +12,9 @@ ASparkHazardZone::ASparkHazardZone()
     
     // 오버랩 전용 Trigger 프로필 지정
     TriggerBox->SetCollisionProfileName(TEXT("Trigger"));
+
+    // Trigger 프로필은 Wall 트레이스 채널(GameTraceChannel1)을 막아서, 낙하 중 이 영역 안에서 Wall Slide가 걸린다. 벽으로 인식되지 않게 무시한다
+    TriggerBox->SetCollisionResponseToChannel(ECC_GameTraceChannel1, ECR_Ignore);
 }
 
 void ASparkHazardZone::BeginPlay()

@@ -2547,6 +2547,48 @@ flowchart LR
 
 ---
 
+## 2026-10-07 (3) — Phase 3 Vertical Slice: 대표 구간 Level Brief 작성 (SPARK-59)
+
+**Milestone:** Phase 3 — Vertical Slice
+**Category:** Level Design / Docs
+**Status:** Completed (수치와 구성은 잠정 확정, Graybox 결과에 따라 재검토)
+**Branch:** feature/save-system
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- `08_Roadmap.md`의 Level Brief 항목 10개를 모두 채운 Vertical Slice 대표 구간 문서를 만든다.
+
+### 작업 내용
+
+- `04_Level_Design.md`에 "Level Brief: VS-01 Power Restoration" 섹션을 추가. 레벨 목표, 구간 흐름과 시간 배분(약 16분), 메커니즘(신규 없음, 구현된 요소 재사용), 주요 퍼즐 3개, 이동 난이도, 체크포인트 6개 위치, 환경 테마, 예상 플레이 시간, 시작/종료 상태를 정의.
+- 메커니즘 분류는 코드 현황(Switch, Door, CablePlug/Socket, HazardZone, Surface, Checkpoint)을 확인해 작성. GDD의 "움직이는 기어"는 미구현이라 Vertical Slice에서 제외.
+- 신규 메커니즘을 두지 않은 이유: Vertical Slice는 새 규칙을 만드는 단계가 아니라 기존 규칙의 품질을 검증하는 단계이기 때문.
+
+### 결정 및 설계 검토 (Architecture Decision)
+
+- **Rubber 구간 규칙**: Rubber가 배치되는 구간에는 반드시 Cable 또는 간접조명 힌트를 하나 이상 둔다.
+  - 힌트는 진행 방향만 알려주고, 힌트 사이 구간은 기억해서 건너게 한다("Memory Is Gameplay" 유지).
+  - 간접조명 힌트는 급격한 점멸이 아니라 4~6초 주기의 느린 페이드로 하고, 초당 3회를 넘기는 점멸은 쓰지 않는다. 눈 피로와 광과민성 위험 때문이며 Flash Reduction(SPARK-58) 적용 대상에 포함한다.
+  - "자동 조명 최소화" 원칙의 Rubber 구간 한정 예외로 둔다.
+- **Area Restoration 연출**: 구역 조명 복구와 End Door 개방까지만 하고 Niagara 연출은 넣지 않는다.
+- 위 항목과 구간 구성, 체크포인트 개수는 최종 확정이 아니며 SPARK-60(Graybox), SPARK-61(Gameplay Test) 결과에 따라 재검토한다.
+
+### 결과
+
+- SPARK-59 완료. 후속 SPARK-60(Graybox 제작)의 입력 문서가 마련됨.
+
+### 다음 작업
+
+- SPARK-60 Vertical Slice Graybox 제작(에디터 레벨 작업), 이어서 SPARK-57(Respawn 적용), SPARK-61(Gameplay Test).
+- Rubber 구간 힌트 조명의 주기와 밝기는 Graybox에서 실측해 확정.
+
+### 관련 자료
+
+- Related Document: [04_Level_Design.md](./04_Level_Design.md), [01_GDD.md](./01_GDD.md), [08_Roadmap.md](./08_Roadmap.md)
+
+---
+
 # Daily Log Template
 
 

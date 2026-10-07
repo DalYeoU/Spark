@@ -1,5 +1,6 @@
 #include "Checkpoint/SparkCheckpoint.h"
 
+#include "EngineUtils.h"
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/PointLightComponent.h"
@@ -94,6 +95,15 @@ bool ASparkCheckpoint::ActivateCheckpoint(APawn* PlayerPawn)
 	if (ActiveLight)
 	{
 		ActiveLight->SetIntensity(ActiveLightIntensity);
+	}
+
+	// 현재 복원 지점만 점등되도록 이전 체크포인트의 불을 끈다
+	for (TActorIterator<ASparkCheckpoint> It(GetWorld()); It; ++It)
+	{
+		if (*It != this && It->ActiveLight)
+		{
+			It->ActiveLight->SetIntensity(0.0f);
+		}
 	}
 
 	const FVector FeedbackLocation = GetActorLocation() + FeedbackSpawnOffset;

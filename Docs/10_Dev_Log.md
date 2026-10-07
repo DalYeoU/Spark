@@ -2522,6 +2522,9 @@ flowchart LR
 - `SaveGameData`가 저장할 때 현재 버전을 기록하고, `LoadGameData`/`CanContinue`는 더 새로운 버전으로 저장된 파일을 거부한다(`nullptr`/`false`). 버전 필드 도입 전 세이브는 0으로 읽혀 그대로 호환된다.
 - `Source/Spark/Save/SparkSaveTest.cpp`에 `Spark.Save.RoundTrip` 자동화 테스트 추가: 없는 슬롯 로드 시 `nullptr`, 저장/로드 왕복 시 ID/레벨/트랜스폼/버전 유지, 새 버전의 비호환 판정을 검증한다. 테스트 전용 슬롯을 쓰고 시작과 끝에 삭제해 실제 세이브에 영향이 없다.
 
+- 체크포인트를 여러 개 배치해 테스트하던 중, 이전 체크포인트의 `ActiveLight`가 계속 켜져 있어 현재 복원 지점을 구분할 수 없는 문제를 확인. `ActivateCheckpoint()`에서 같은 월드의 다른 `ASparkCheckpoint`를 순회해 `ActiveLight`를 끄도록 수정(새 체크포인트만 점등). 이전 체크포인트의 `bIsActivated`는 유지되어 재저장되지 않는다. PIE에서 두 체크포인트 연속 통과와 두 번째 지점 복원을 확인.
+- 이번 작업은 Jira(SPARK) 기존 티켓에 해당하는 항목이 없어 티켓 없이 진행. 세이브 관련 SPARK-45~49, 53, 55는 모두 완료 상태.
+
 ### 문제 및 해결 (Troubleshooting)
 
 - **문제**: `EAutomationTestFlags::ApplicationContextMask`에서 C2838/C2065 컴파일 오류 발생.
@@ -2533,8 +2536,8 @@ flowchart LR
 | 테스트 항목 | 결과 | 비고 |
 |------------|------|------|
 | Spark.Save.RoundTrip | Pass | Session Frontend Automation 실행 |
+| 체크포인트 연속 통과 및 두 번째 지점 복원 | Pass | 체크포인트 2개 배치, 이전 지점 불 꺼짐 확인 |
 | 기존 세이브로 PIE 이어하기/복원 | 미확인 | 수동 확인 필요 |
-| 체크포인트 연속 통과 | 미확인 | 수동 확인 필요 |
 | 저장 도중 PIE 종료 | 미확인 | 수동 확인 필요 |
 
 ### 다음 작업

@@ -356,7 +356,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[Start Area] --> B[Movement Introduction] --> C[Metal / Rubber Puzzle] --> D[Wall Movement Challenge] --> E[Cable Puzzle] --> F[Combined Challenge] --> G[Area Restoration] --> H[End]
+    A[Start Area] --> B[Movement Introduction] --> C[Metal / Rubber Puzzle] --> D[Wall Movement] --> E[Cable Puzzle] --> F[Combined Challenge] --> G[Area Restoration] --> H[End]
 ```
 
 | 구간 | 가르치는 규칙 | 난이도 | 예상 시간 |
@@ -364,7 +364,7 @@ flowchart LR
 | Start Area (Opening Sequence) | 낙하 착지 Spark로 시야가 열리는 규칙 | Easy | 1분 |
 | Movement Introduction | 약한 빛을 따라 이동, Slide로만 통과하는 출구 | Easy | 2분 |
 | Metal / Rubber Puzzle | Rubber에서는 Spark가 없다. 힌트로 방향을 잡고 사이 구간은 기억한다 | Medium | 3분 |
-| Wall Movement Challenge | Wall Slide, Wall Jump | Hard | 3분 |
+| Wall Movement | [Wall 학습 유도](#wall-학습-유도) 2단계 후 벽 점프 도전 | Medium에서 Hard로 | 3분 |
 | Cable Puzzle | Cable은 강한 Spark를 내고, 연결하면 전력이 복구된다 | Medium | 3분 |
 | Combined Challenge | Rubber 구간에서 Cable Spark를 길잡이로 쓰며 벽 이동까지 조합 | Hard | 3분 |
 | Area Restoration | 조명 복구 연출과 End Door 개방 | Rest | 1분 |
@@ -408,6 +408,33 @@ flowchart LR
 - 아래 방에는 바닥이 반드시 있어야 한다. 바닥이 없으면 Hazard Zone이나 FellOutOfWorld로 실패 처리되어 학습 구간이 아니라 실패 구간이 된다.
 - 낙하 후에는 위로 돌아갈 수 없는 일방향 구간이므로, 체크포인트 CP1은 아래 방에 둔다.
 
+## Wall 학습 유도
+
+Wall Slide와 Wall Jump는 UI 안내 없이 환경과 Spark 피드백만으로 학습시킨다. [Puzzle Design Principles](#puzzle-design-principles)의 "한 번에 하나의 규칙"에 따라 규칙 하나당 한 단계로 나눈다.
+
+코드 기준 동작은 다음과 같다. 학습 구간 설계는 이 동작을 전제로 한다.
+
+- Wall Slide는 입력 없이 자동으로 걸린다. 공중에서 캐릭터 정면 60cm 안에 "Wall" Trace Channel의 거의 수직인 면이 있으면 발동하고, 낙하 속도가 -150으로 제한된다.
+- 슬라이드 중에는 0.15초마다 벽에 마찰 Spark가 터져 벽면이 드러난다.
+- Wall Jump는 Wall Slide 중에 점프 키를 눌러 발동하며, 벽 반대 방향으로 수평 500, 수직 500의 힘을 받는다.
+- Wall Jump는 착지하기 전에는 한 번만 쓸 수 있다. 같은 공중 구간에서 벽 점프를 연달아 이어서 벽을 타고 오를 수는 없다.
+
+```mermaid
+flowchart LR
+    A[1단계 Wall Slide 발견] --> B[2단계 Wall Jump 발견] --> C[3단계 도전 벽 점프 조합]
+```
+
+| 단계 | 상황 | 학습 유도 방식 |
+|------|------|----------------|
+| 1. Wall Slide 발견 | 높은 턱에서 앞으로 걸어 내려가면 낙하 중에 정면 벽에 닿는다. 바닥까지 약 400이라 안전하다. | 입력 없이 자동으로 걸린다. 닿는 순간 Spark가 터지고 낙하가 느려져서 "벽에 닿으면 스파크가 나고 천천히 내려간다"를 몸으로 배운다. 벽면이 Spark로 드러나는 것이 보상이다. |
+| 2. Wall Jump 발견 | 막다른 통로에서 한 번의 점프로는 못 오르는 높이(약 150)의 턱이 반대편에 있고, 약한 빛이 그 턱을 비춘다. 마주 보는 벽이 있다. | 점프가 닿지 않는다는 것을 시도하다 알게 된다. 벽으로 점프하면 1단계에서 익힌 Spark가 터지고, 그때 점프 키를 다시 누르면 Wall Jump Flash와 함께 턱으로 올라간다. 정답을 숨기지 않는다. |
+| 3. 도전 | 벽 점프를 2~3번 쓰되 매번 착지한 뒤 다시 쓰게 한다. | 앞의 두 규칙을 조합해 쓰게 한다. 새 규칙은 추가하지 않는다. |
+
+- 2단계의 턱은 높이 150, 벽에서 턱까지 수평 거리 250~300으로 한다. 일반 점프의 최대 높이(86)로는 닿지 않고, 점프 중 벽 점프의 최고점(시작 높이 + 106)으로는 닿는 값이다.
+- 벽 점프가 가능한 벽은 모든 구간에서 같은 재질과 색으로 통일해, 플레이어가 "이 벽은 탈 수 있다"를 시각적으로 일반화할 수 있게 한다.
+- 벽을 타면 안 되는 벽은 "Wall" Trace Channel에 대한 응답을 Ignore로 설정하고, 벽 재질도 다르게 한다. 같은 모습인데 걸리지 않는 벽을 만들지 않는다.
+- Rubber 벽은 Spark가 없어서 슬라이드가 걸려도 어둠 속에서 피드백이 없다. Rubber 벽을 타게 할 경우 [Rubber 구간 규칙](#rubber-구간-규칙)의 힌트를 반드시 함께 둔다.
+
 ## 주요 퍼즐
 
 - **Puzzle A (Metal / Rubber)**: Rubber 구간에서는 Spark가 나오지 않는다. 플레이어는 [Rubber 구간 규칙](#rubber-구간-규칙)의 힌트로 방향을 잡고, 힌트와 힌트 사이의 지형은 기억해서 건넌다.
@@ -426,7 +453,7 @@ Rubber가 배치되는 구간에는 반드시 Cable 또는 간접조명 힌트�
 
 ## 이동 난이도
 
-[Difficulty Curve](#difficulty-curve)를 따라 Easy, Medium, Hard, Rest 순서로 올라가고 마지막에 Rest로 마친다. Wall Movement Challenge와 Combined Challenge 두 곳만 Hard로 두고, 연속해서 Hard가 이어지지 않게 사이에 Cable Puzzle(Medium)을 배치한다.
+[Difficulty Curve](#difficulty-curve)를 따라 Easy, Medium, Hard, Rest 순서로 올라가고 마지막에 Rest로 마친다. Wall Movement의 마지막 도전 단계와 Combined Challenge 두 곳만 Hard로 두고, 연속해서 Hard가 이어지지 않게 사이에 Cable Puzzle(Medium)을 배치한다.
 
 ## 체크포인트 위치
 
@@ -510,8 +537,8 @@ flowchart LR
 | 가로 틈 (걷기 점프) | 200~250 | 300~350 | 400 이내 | 한계 460 |
 | 가로 틈 (달리기 점프) | 300~400 | 450~550 | 600 이내 | 한계 730 |
 | 위로 오르는 단차 | 40 이하 | 60 이하 | 75 이하 | 한계 86, 기본 StepUp은 45 |
-| 벽 점프 벽 간격 | 해당 없음 | 250~300 | 330 이내 | 한계 425, 서로 마주 보는 벽 기준 |
-| 벽 점프 후 한 번에 오르는 높이 | 해당 없음 | 80 이하 | 100 이하 | 한계 106 |
+| 벽에서 벽 점프 착지 발판까지 수평 거리 | 해당 없음 | 250~300 | 330 이내 | 한계 425 |
+| 점프 중 벽 점프로 닿는 턱 높이 | 해당 없음 | 150 | 180 이내 | 시작 높이(최대 86) + 106 |
 
 공통 기준은 다음과 같다.
 
@@ -528,7 +555,7 @@ flowchart LR
 | Start Area | 약 3,000 | 직선, 위험 없음 |
 | Movement Introduction | 약 4,000 | 낮은 단차와 짧은 가로 틈, 슬라이드 구간 1개 |
 | Metal / Rubber Puzzle | 약 5,000 | Rubber 구간마다 힌트 배치 |
-| Wall Movement Challenge | 약 4,000 | 벽 점프 3~4회, 수직 위주 |
+| Wall Movement | 약 4,000 | 학습 2단계 후 벽 점프 도전 2~3회, 매회 착지 후 재사용 |
 | Cable Puzzle | 약 5,000 | Plug와 Socket 사이 거리를 길게 |
 | Combined Challenge | 약 5,000 | Rubber와 벽 이동 결합 |
 | Area Restoration | 약 2,000 | 이동 위주, 연출 지점 |

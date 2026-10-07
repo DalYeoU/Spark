@@ -38,13 +38,13 @@ protected:
     AActor* FindBestInteractable() const;
 
 private:
-    // 탐지 사거리
+    // 탐지 구체 중심을 캐릭터 정면으로 얼마나 띄울지
     UPROPERTY(EditAnywhere, Category = "Interaction")
     float InteractionDistance = 50.0f;
-    
-    // 탐지 구체 반지름
+
+    // 탐지 구체 반지름. 바닥에 놓인 물체까지 닿으려면 캡슐 중심 높이 근처(약 90)여야 한다
     UPROPERTY(EditAnywhere, Category = "Interaction")
-    float InteractionRadius = 20.0f;
+    float InteractionRadius = 90.0f;
     
     // 탐지 검사 주기
     UPROPERTY(EditAnywhere, Category = "Interaction")

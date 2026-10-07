@@ -1,6 +1,8 @@
 #include "Components/SparkInteractionComponent.h"
 
 #include "Engine/World.h"
+#include "Engine/OverlapResult.h"
+#include "Components/PrimitiveComponent.h"
 #include "TimerManager.h"
 #include "GameFramework/Pawn.h"
 #include "Interaction/Interactable.h"
@@ -86,37 +88,46 @@ AActor* USparkInteractionComponent::FindBestInteractable() const
         return nullptr;
     }
 
+    const FVector Origin = Owner->GetActorLocation();
     const FVector Forward = Owner->GetActorForwardVector();
 
-    // 시작점을 앞으로 20만큼 당겨서 캐릭터 몸통과 바로 겹치는 것 방지
-    const FVector Start = Owner->GetActorLocation() + FVector(0.0f, 0.0f, 30.0f) + (Forward * 20.0f);
-    const FVector End = Start + (Forward * InteractionDistance);
+    // 구체 중심을 캡슐 중심보다 살짝 낮춰 앞에 두고 반지름을 크게 잡아, 바닥에 놓인 물체부터 가슴 높이 물체까지 한 번에 겹치게 한다
+    const FVector Center = Origin + (Forward * InteractionDistance) + FVector(0.0f, 0.0f, -20.0f);
 
-    FHitResult HitResult;
-    FCollisionShape Sphere = FCollisionShape::MakeSphere(InteractionRadius);
-    FCollisionQueryParams QueryParams(FName(TEXT("InteractionSweep")), false, Owner);
-
-    // 캐릭터 정면 방향으로 Sphere Sweep 수행
-    if (World->SweepSingleByChannel(HitResult, Start, End, FQuat::Identity, ECC_Visibility, Sphere, QueryParams))
+    TArray<FOverlapResult> Overlaps;
+    FCollisionQueryParams QueryParams(FName(TEXT("InteractionOverlap")), false, Owner);
+    if (!World->OverlapMultiByChannel(Overlaps, Center, FQuat::Identity, ECC_Visibility, FCollisionShape::MakeSphere(InteractionRadius), QueryParams))
     {
-        AActor* HitActor = HitResult.GetActor();
-        if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractable::StaticClass()))
-        {
-            // 정면 벡터와 대상 방향 벡터의 내적으로 시선 각도 체크
-            const FVector DirToTarget = (HitActor->GetActorLocation() - Owner->GetActorLocation()).GetSafeNormal2D();
-            const float Dot = FVector::DotProduct(Forward.GetSafeNormal2D(), DirToTarget);
-
-            // 정면 60도 이내(cos60=0.5)로 보고 있을 때만 상호작용 허용
-            if (Dot >= 0.5f)
-            {
-                APawn* Pawn = Cast<APawn>(Owner);
-                if (IInteractable::Execute_CanInteract(HitActor, Pawn))
-                {
-                    return HitActor;
-                }
-            }
-        }
+        return nullptr;
     }
 
-    return nullptr;
+    APawn* Pawn = Cast<APawn>(Owner);
+    AActor* BestActor = nullptr;
+
+    // 정면 60도 이내(cos60=0.5)만 허용하고, 그 안에서 시선 방향에 가장 가까운 대상을 고른다
+    float BestDot = 0.5f;
+
+    for (const FOverlapResult& Overlap : Overlaps)
+    {
+        AActor* Candidate = Overlap.GetActor();
+        if (!Candidate || !Candidate->GetClass()->ImplementsInterface(UInteractable::StaticClass())) continue;
+
+        // 정면 벡터와 대상 방향 벡터의 내적으로 시선 각도 체크
+        const FVector DirToTarget = (Candidate->GetActorLocation() - Origin).GetSafeNormal2D();
+        const float Dot = FVector::DotProduct(Forward.GetSafeNormal2D(), DirToTarget);
+        if (Dot < BestDot) continue;
+
+        if (!IInteractable::Execute_CanInteract(Candidate, Pawn)) continue;
+
+        // 벽 너머에 있는 대상은 제외한다. 구체는 벽을 통과해 겹치므로 대상까지 시선이 막혔는지 따로 확인
+        const UPrimitiveComponent* Component = Overlap.GetComponent();
+        const FVector TargetPoint = Component ? Component->Bounds.Origin : Candidate->GetActorLocation();
+        FHitResult SightHit;
+        if (World->LineTraceSingleByChannel(SightHit, Origin, TargetPoint, ECC_Visibility, QueryParams) && SightHit.GetActor() != Candidate) continue;
+
+        BestActor = Candidate;
+        BestDot = Dot;
+    }
+
+    return BestActor;
 }

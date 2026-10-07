@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "SparkDoor.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FSparkDoorOpenedSignature);
+
 /**
  * ASparkDoor
  * 
@@ -16,7 +18,11 @@ class SPARK_API ASparkDoor : public AActor
 
 public:	
 	ASparkDoor();
-    
+
+    // 문이 열릴 때 방송. 레벨 블루프린트에서 바인딩해 조명 연출 등 레벨 고유 연출을 문 BP와 분리해 처리한다
+    UPROPERTY(BlueprintAssignable, Category = "Door|Events")
+    FSparkDoorOpenedSignature OnDoorOpened;
+
     // 문 열기
     UFUNCTION(BlueprintCallable, Category = "Door")
     virtual void OpenDoor();

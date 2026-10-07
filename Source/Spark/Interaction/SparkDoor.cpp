@@ -17,6 +17,7 @@ void ASparkDoor::OpenDoor()
     {
         bIsOpen = true;
         BP_OnDoorOpened();
+        OnDoorOpened.Broadcast();
     }
 }
 

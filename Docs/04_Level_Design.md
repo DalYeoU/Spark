@@ -361,8 +361,8 @@ flowchart LR
 
 | 구간 | 가르치는 규칙 | 난이도 | 예상 시간 |
 |------|---------------|--------|-----------|
-| Start Area | 어둠과 Spark로 시야가 열리는 규칙 | Easy | 1분 |
-| Movement Introduction | Jump 착지 Spark, Slide 마찰 Spark | Easy | 2분 |
+| Start Area (Opening Sequence) | 낙하 착지 Spark로 시야가 열리는 규칙 | Easy | 1분 |
+| Movement Introduction | 약한 빛을 따라 이동, Slide로만 통과하는 출구 | Easy | 2분 |
 | Metal / Rubber Puzzle | Rubber에서는 Spark가 없다. 힌트로 방향을 잡고 사이 구간은 기억한다 | Medium | 3분 |
 | Wall Movement Challenge | Wall Slide, Wall Jump | Hard | 3분 |
 | Cable Puzzle | Cable은 강한 Spark를 내고, 연결하면 전력이 복구된다 | Medium | 3분 |
@@ -373,7 +373,7 @@ flowchart LR
 
 ## 메커니즘
 
-신규 메커니즘은 없다. Vertical Slice는 새 규칙을 만드는 단계가 아니라 기존 규칙의 품질을 검증하는 단계이므로, 아래는 모두 구현된 요소를 재사용한다.
+플레이어가 익혀야 하는 신규 규칙은 없다. Vertical Slice는 새 규칙을 만드는 단계가 아니라 기존 규칙의 품질을 검증하는 단계이므로, 아래는 모두 구현된 요소를 재사용한다. 다만 [Opening Sequence](#opening-sequence)에서 레벨 스크립트로 구현하는 연출(조명 점멸, 바닥 붕괴)은 새로 만들어야 한다. 이는 게임 규칙이 아니라 연출이다.
 
 | 분류 | 요소 |
 |------|------|
@@ -385,6 +385,28 @@ flowchart LR
 | 진행 | Checkpoint, Save, Pause Menu |
 
 GDD의 "움직이는 기어"(Chapter 1)는 아직 구현되어 있지 않다. 이 Brief에는 넣지 않는다.
+
+## Opening Sequence
+
+첫 낙하를 통해 "움직임이 곧 시야"라는 규칙을 학습시키는 도입부이다. 별도 설명 없이 환경과 연출만으로 유도한다.
+
+```mermaid
+flowchart LR
+    A[밝은 시작 방] --> B[버튼 또는 상호작용으로 방 문 열기] --> C[방 조명 점멸 후 소등] --> D[출구를 향해 이동] --> E[복도 바닥 붕괴] --> F[낙하와 큰 충격] --> G[착지 Spark로 방 전체가 드러남] --> H[약한 빛이 슬라이드 출구로 유도]
+```
+
+- 시작 방은 밝고, 문 밖으로 출구가 보인다. 플레이어는 자연스럽게 출구로 가려 한다.
+- 문을 열면 방의 조명이 점멸하다가 꺼진다. 어둠으로 들어가는 순간을 플레이어가 직접 만든 것처럼 느끼게 한다.
+- 이동 중 바닥이 무너지고, 낙하 착지에서 큰 Spark가 터져 아래 방의 환경이 한 번에 드러난다. 이 Spark는 플레이어의 착지 행동으로 발생하므로 "플레이어 행동으로만 Spark 발생" 규칙과 어긋나지 않는다.
+- 이후 아래 방은 아주 약한 빛만 남고, 그 빛이 슬라이드로만 통과하는 출구로 유도한다.
+- 시작 방의 밝은 조명과 점멸은 "거의 검은 환경" 기준의 의도된 예외이다. 밝은 상태에서 어둠으로 넘어가는 대비를 만들기 위한 연출이다.
+
+### 치수 기준
+
+- 큰 착지 Spark와 Heavy Landing은 낙하 속도로 결정된다. 코드 기준 Heavy Landing 임계값은 -1700, Spark 밝기는 낙하 속도 약 1500에서 최대에 도달한다.
+- 낙하 높이는 약 1300으로 한다. v = √(2 x 1176 x 1300) ≈ 1750이므로 Heavy Landing 임계값을 넘고, Spark 밝기도 최대가 된다. 낙하 시간은 약 1.5초이다.
+- 아래 방에는 바닥이 반드시 있어야 한다. 바닥이 없으면 Hazard Zone이나 FellOutOfWorld로 실패 처리되어 학습 구간이 아니라 실패 구간이 된다.
+- 낙하 후에는 위로 돌아갈 수 없는 일방향 구간이므로, 체크포인트 CP1은 아래 방에 둔다.
 
 ## 주요 퍼즐
 
@@ -412,7 +434,7 @@ Rubber가 배치되는 구간에는 반드시 Cable 또는 간접조명 힌트�
 
 ```mermaid
 flowchart LR
-    CP1[CP1 Movement Introduction 종료] --> CP2[CP2 Metal / Rubber 퍼즐 완료] --> CP3[CP3 Wall Challenge 진입 전] --> CP4[CP4 Wall Challenge 완료] --> CP5[CP5 Cable 퍼즐 완료] --> CP6[CP6 Combined 진입 전]
+    CP1[CP1 낙하 후 아래 방] --> CP2[CP2 Metal / Rubber 퍼즐 완료] --> CP3[CP3 Wall Challenge 진입 전] --> CP4[CP4 Wall Challenge 완료] --> CP5[CP5 Cable 퍼즐 완료] --> CP6[CP6 Combined 진입 전]
 ```
 
 - 새 규칙을 학습하기 전과 Hard 구간 직전에는 반드시 체크포인트를 둔다.
@@ -429,7 +451,7 @@ flowchart LR
 
 ## 시작 상태
 
-- 완전한 암흑이며 시설 전원이 차단된 상태.
+- 밝은 시작 방에서 시작한다. 방 문을 열면 조명이 꺼지고 이후부터는 완전한 암흑이며 시설 전원이 차단된 상태가 된다.
 - 재가동된 유지보수 로봇이 Start Area의 PlayerStart에서 시작한다.
 - 활성화된 체크포인트와 세이브 데이터가 없다.
 

@@ -61,7 +61,11 @@ public:
     // 달리기 Spark 연출 트리거
     UFUNCTION(BlueprintCallable, Category = "Spark|Events")
     void TriggerSprintSpark(const FHitResult& HitResult);
-    
+
+    // 환경 케이블 접촉 Spark 연출 트리거. 바닥 표면과 무관하게 CableData 기준으로 항상 발생한다
+    UFUNCTION(BlueprintCallable, Category = "Spark|Events")
+    void TriggerCableSpark(const FVector& Location, const FVector& Normal);
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -82,7 +86,8 @@ private:
     bool ApplySurfaceOverride(const FHitResult& HitResult, FSparkEffectData& InOutEffectData) const;
     
     // 공통 Spark FX(조명 + 파티클) 일괄 실행 보조 함수
-    void ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal, const FHitResult& HitResult);
+    // bUseSurfaceOverride가 false면 표면 판정(Rubber 차단, 표면별 FX 교체)을 건너뛰고 EffectData를 그대로 쓴다
+    void ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal, const FHitResult& HitResult, bool bUseSurfaceOverride = true);
     
     // Point Light 잔광 페이드 아웃 타이머 시작 보조 함수
     void StartLightFadeOut(UPointLightComponent* LightComponent, float Intensity, float Duration);

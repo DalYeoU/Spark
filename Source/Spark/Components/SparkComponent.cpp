@@ -123,11 +123,11 @@ bool USparkComponent::ApplySurfaceOverride(const FHitResult& HitResult, FSparkEf
     return true;
 }
 
-void USparkComponent::ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal, const FHitResult& HitResult)
+void USparkComponent::ExecuteSparkFX(const FSparkEffectData& EffectData, const FVector& Location, const FVector& Normal, const FHitResult& HitResult, bool bUseSurfaceOverride)
 {
     // 표면 검사 및 오버라이드
     FSparkEffectData FinalFXData = EffectData;
-    if (!ApplySurfaceOverride(HitResult, FinalFXData)) return;
+    if (bUseSurfaceOverride && !ApplySurfaceOverride(HitResult, FinalFXData)) return;
     // 조명은 파티클보다 더 높이 띄워서 바닥/캐릭터에 파묻히지 않게 함
     const FVector LightLocation = Location + (Normal * 15.0f);
     SpawnSparkLight(LightLocation, FinalFXData.LightIntensity, FinalFXData.LightRadius, FinalFXData.LightDuration);
@@ -277,5 +277,24 @@ void USparkComponent::TriggerSprintSpark(const FHitResult& HitResult)
     }
 
     ExecuteSparkFX(FXData, SpawnLocation, Normal, HitResult);
+}
+
+void USparkComponent::TriggerCableSpark(const FVector& Location, const FVector& Normal)
+{
+    const FVector SpawnLocation = Location + (Normal * 5.0f);
+
+    // 기본 Fallback 값 (케이블 접촉은 가장 강한 임팩트)
+    FSparkEffectData FXData;
+    FXData.LightIntensity = 12000.0f;
+    FXData.LightRadius = 900.0f;
+    FXData.LightDuration = 0.6f;
+
+    if (SparkEffectDataAsset)
+    {
+        FXData = SparkEffectDataAsset->CableData;
+    }
+
+    // 닿은 대상이 바닥이 아니라 케이블 자체라 표면 판정은 건너뛴다
+    ExecuteSparkFX(FXData, SpawnLocation, Normal, FHitResult(), false);
 }
 

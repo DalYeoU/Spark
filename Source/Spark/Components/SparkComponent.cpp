@@ -285,9 +285,9 @@ void USparkComponent::TriggerCableSpark(const FVector& Location, const FVector& 
 
     // 기본 Fallback 값 (케이블 접촉은 가장 강한 임팩트)
     FSparkEffectData FXData;
-    FXData.LightIntensity = 12000.0f;
-    FXData.LightRadius = 900.0f;
-    FXData.LightDuration = 0.6f;
+    FXData.LightIntensity = 15000.0f;
+    FXData.LightRadius = 1000.0f;
+    FXData.LightDuration = 1.2f;
 
     if (SparkEffectDataAsset)
     {

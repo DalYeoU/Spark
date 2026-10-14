@@ -2589,6 +2589,124 @@ flowchart LR
 
 ---
 
+## 2026-10-12: Phase 3 Vertical Slice: VS01 Graybox 제작 (SPARK-60, 진행 중)
+
+**Milestone:** Phase 3 Vertical Slice
+**Category:** Level Design / Gameplay C++
+**Status:** In Progress (배치, 플레이 검증, 제출용 패키징 검증 완료. 제출 준비와 문서 마무리 남음)
+**Branch:** feature/save-system
+**Engine:** Unreal Engine 5.5.4
+
+### 목표
+
+- Level Brief(SPARK-59)를 기준으로 VS01 레벨을 한 레벨 안에서 Graybox로 제작한다.
+- 제작 중 필요한 지원 C++(상호작용 감지, 환경 케이블 등)를 함께 구현한다.
+
+### 작업 내용
+
+**구간 제작 현황**
+
+| 구간 | 상태 |
+|---|---|
+| Opening Sequence (시작 방, 스위치로 문 개방, 조명 점멸 후 소등, 바닥 붕괴, 낙하) | 완성 |
+| 슬라이드 출구 | 완성 |
+| Metal / Rubber 퍼즐 (Rubber 6칸, HazardZone) | 완성 |
+| Wall 1~2단계 (벽 슬라이드 발견, 벽 점프 턱) | 기존 구멍과 턱을 재사용해 단순화. 벽 점프로 턱에 올라 Cable 방으로 진입하는 구조로 확정 (원래 의도한 구간 구성과 달라 Brief의 Wall 1~2단계 서술은 갱신 필요) |
+| Cable 방 (CablePlug, CableSocket, Door, 환경 케이블) | 동작 확인 |
+| Combined Challenge (Rubber 도약 3칸, 벽 점프 수직 통로 3회) | 배치 완료. 좌표는 사용자가 직접 조정함. 플레이 검증 완료 |
+| Area Restoration (조명 복구와 End Door만), End | 배치와 레벨 블루프린트 작성 완료. 플레이 검증 완료 |
+
+**C++ 변경**
+
+- `ASparkDoor`: `OnDoorOpened` 델리게이트 추가. 레벨 블루프린트에서 문이 열린 시점에 조명 연출을 연결하기 위함.
+- `USparkInteractionComponent::FindBestInteractable`: 바닥에 놓인 스위치와 케이블 Plug를 감지하도록 재작성. 전방 원뿔 대신 캐릭터 앞 오버랩 구(기본 거리 50, 반지름 90, 아래로 20 오프셋)를 쓰고, 시선 방향 dot 0.5 이상과 LineTrace(ECC_Visibility) 가시성을 확인한다.
+- `ASparkHazardZone`: TriggerBox가 Wall 채널(`ECC_GameTraceChannel1`)을 Ignore하도록 수정.
+- `ASparkLiveCable` (신규): 통과 가능한 환경 케이블. 루트 `UBoxComponent`가 Pawn만 오버랩하고, 겹쳐 있는 동안 `RepeatInterval`(0.25초)마다 박스 표면에서 캐릭터와 가장 가까운 점에 `USparkComponent::TriggerCableSpark`를 호출한다.
+- `USparkComponent::TriggerCableSpark` (신규): 바닥 Surface와 무관하게 `CableData` 기준으로 Spark를 발생시킨다. 이를 위해 `ExecuteSparkFX`에 `bUseSurfaceOverride` 인자를 추가했다.
+
+**레벨 블루프린트 (Area Restoration, End)**
+
+- `Trigger_Restore`의 `OnActorBeginOverlap`에서 `Cast To SparkCharacter`로 캐릭터만 통과시키고, `DoOnce`로 한 번만 실행한다.
+- PointLight 4개(Movable, 초기 Intensity 0)에 `Set Intensity(8.0)`을 적용하고, `Delay(1.5)` 뒤 End Door의 `OpenDoor`를 호출한다.
+- `Trigger_End`는 아직 End 화면이 없어 `Print String("VS-01 Complete")`로 둔다.
+- 조명을 서서히 켜는 연출은 Timeline(`Alpha` 0에서 1, 길이 2초)에 Lerp(0, 8)를 연결하는 방식으로 안내했다. 적용 여부는 아직 확인하지 않았다.
+- 라이트가 많아지면 레퍼런스를 하나씩 잇지 않고 Actor Tag와 `Get All Actors With Tag`, `For Each Loop`로 바꾼다. 지금은 4개라 직접 연결을 유지한다.
+
+**설계 결정**
+
+- Opening Sequence는 다른 출구를 두고 환경(약한 빛)으로 유도하며, 슬라이드로만 나갈 수 있게 한다.
+- 슬라이드는 스프린트 중에만 가능하므로(MinSlideEntrySpeed 500) 슬라이드 출구는 스프린트 진입 거리를 확보해 배치했다.
+- Wall 3단계는 "공중 구간당 벽 점프 1회" 규칙 때문에 벽을 연속으로 차는 구성이 불가능하다. 반대편 벽 턱으로 건너가 착지한 뒤 다시 도약하는 지그재그 통로로 설계했다(벽 간격 600, 턱 깊이 250, 턱 간격 170).
+- Combined Challenge에서는 통로 중앙에 `ASparkLiveCable`을 세로로 두어, 벽 점프로 가로지를 때 Spark가 터져 Rubber 턱의 위치가 드러나게 했다.
+- 체크포인트 표시용 조명은 임시다. 표시 방식은 나중에 다른 방법으로 교체한다.
+
+### 문제 및 해결 (Troubleshooting)
+
+- **문제**: 낙하 구간에서 공중인데 Wall Slide 모션이 나왔다.
+  - **확인된 사실**: 바닥 붕괴 TriggerBox의 프리셋이 Wall 채널에 Block이었다. 채널을 Ignore로 바꿔도 한 번은 반영이 되돌아갔고, 레벨 저장 누락이 원인이었다.
+  - **원인 (확정)**: Wall Slide LineTrace가 Trigger 프리셋의 Block에 걸림. 처음에 바닥 가장자리 때문이라고 설명한 것은 틀렸다.
+  - **해결**: TriggerBox와 `ASparkHazardZone`을 Wall 채널 Ignore로 변경. 바닥과 천장도 Ignore, 벽은 Block 유지.
+- **문제**: 환경 케이블에 닿으면 Spark가 케이블 정중앙에서만 발생했다.
+  - **확인된 사실**: 액터의 위치를 접촉 지점으로 쓰고 있었고, Overlap 프리셋은 `PM_Cable` Surface 판정 경로를 타지 않아 Spark가 아예 안 나기도 했다.
+  - **원인 (확정)**: 접촉 위치 계산 누락과 Surface 판정 경로 불일치.
+  - **해결**: `GetClosestPointOnCollision`으로 접촉점을 구하고, `TriggerCableSpark`로 Surface 판정을 우회했다.
+- **문제**: Spark가 갑자기 전혀 터지지 않았다.
+  - **확인된 사실**: 헤더 변경 후 Live Coding으로 반영했고, 로그에서 SparkFX가 호출되지 않았다.
+  - **원인 (추정)**: `.h` 변경 후 핫 리로드 상태가 오염된 것으로 보인다. 근거는 에디터 완전 재시작 후 정상 동작했다는 것뿐이다.
+  - **해결**: `.h`를 바꿀 때는 에디터를 닫고 재빌드한다.
+- **문제**: `BP_SparkDoor is incompatible`.
+  - **원인 (추정)**: 이전 핫 리로드가 남긴 BP 클래스 상태. 에디터 재시작으로 해결.
+- **문제**: 체크포인트 조명이 너무 밝아 레벨 분위기를 해쳤다.
+  - **해결**: `ActiveLightIntensity`를 0.03, Attenuation Radius를 300으로 낮췄다. 이 레벨은 기본 조명 스크립트 기준이라 노출이 상대적으로 매우 낮다(힌트 조명도 0.3~8 cd).
+- **문제**: Wall Jump 턱 높이 190은 너무 높았다.
+  - **해결**: 바닥을 -1730으로 내려 턱 높이 170으로 조정. 이 값은 Cable 방으로 올라가는 벽 점프 구간에서 잰 값이다.
+- **문제**: 에디터에 `Package Project` 메뉴가 없었다(`File` 메뉴에도 없음). Visual Studio는 Build Tools만 설치된 상태.
+  - **확인된 사실**: 엔진은 `F:\Develop\Unreal\UE_5.5`에 있고 `RunUAT.bat`이 존재한다. 메뉴가 안 보이는 이유는 확인하지 못했다.
+  - **원인 (미해결)**: 메뉴 위치 오안내(처음 `Platforms` 메뉴라고 안내한 것은 틀렸다)와 별개로, 메뉴 자체가 없는 이유는 모른다.
+  - **해결**: 명령줄 `RunUAT BuildCookRun -platform=Win64 -clientconfig=Shipping -build -cook -stage -pak -archive`로 패키징하기로 했다. 실행 결과는 아직 확인하지 않았다.
+- **문제**: 한 `Set Intensity`의 Target 핀에 라이트 4개를 이으면 하나만 켜질 것이라고 안내했다.
+  - **확인된 사실**: 실제로는 4개가 한 번에 켜졌다.
+  - **원인 (미해결)**: 안내가 틀렸고, 왜 4개가 켜지는지는 확인하지 못했다. 이 구성에 의존하지 말고 다른 동작이 필요하면 다시 검증한다.
+
+### 결과
+
+- 위 구간들이 PIE에서 동작함을 직접 확인했다. 환경 케이블은 접촉한 위치에서 Spark가 터진다.
+- Area Restoration에서 조명 4개가 한 번에 켜지는 것을 직접 확인했다.
+- 사용자가 에디터에서 레벨 플레이 검증을 완료했다고 확인했다(Combined Challenge, End Door 개방, End 트리거 포함). 항목별 수치와 세부 결과는 기록하지 않았다.
+- 패키징과 패키지된 exe의 동작 검증도 완료했다고 사용자가 확인했다. 빌드 시간, 에러 유무, 최종 명령과 옵션 같은 세부 내용은 기록하지 않았다.
+- 이 작업은 미완성 상태이지만 제출 요청에 따라 제출용 Windows 패키지(Shipping)를 만들기로 했다.
+
+### 결정
+
+- 환경 케이블은 두 종류로 구분한다. 퍼즐용(`CablePlug`와 `CableSocket`)과 환경용(`ASparkLiveCable`, 천장이나 바닥, 통과 가능).
+- 상호작용 감지는 전방 원뿔 대신 오버랩 구로 바꾼다. 바닥 오브젝트(케이블, 스위치)를 다루기 위해서다.
+
+### 알려진 문제
+
+- 구멍 위를 점프로 지나가면 붕괴 구간을 건너뛸 수 있다.
+- 달려서 점프하면 건너편 바닥에 닿아 Wall Slide가 걸리고 Light Landing이 나올 수 있다.
+- 환경 케이블 Spark가 많이 겹치면 라이트 그리드 오버플로 경고가 난다. 완화안은 `RepeatInterval` 0.6 정도, `CableData` 반경 600~700이다.
+- 슬라이드 키 힌트(일정 시간 머물면 키를 보여주는 영역과 위젯)는 보류했다.
+- Rubber 구간 힌트 조명은 상시 점등이며 4~6초 주기 페이드는 보류했다. 조명 점멸도 틱이 보이므로 Timeline 등으로 부드럽게 바꿔야 한다.
+
+### 다음 작업
+
+- [ ] Brief의 Wall 1~2단계 서술을 "기존 구멍과 턱의 벽 점프로 Cable 방 진입"으로 단순화한 현재 구성에 맞게 수정
+- [x] 레벨 플레이 검증 (사용자 확인)
+- [ ] 필요하면 조명 Timeline 적용
+- [x] 제출용 Shipping 패키징과 exe 플레이 확인 (사용자 확인)
+- [ ] 폴더 전체 zip과 안내 텍스트(조작키, 미완성 항목, 알려진 문제, 종료 방법) 준비 후 제출
+- [ ] `04_Level_Design.md`의 Level Brief와 Graybox 수치를 실제 좌표와 값으로 갱신
+- [ ] SPARK-60 완료 전환, 이후 SPARK-57, SPARK-61
+
+### 관련 자료
+
+- Commit: `e1b5f10`, `f30f309`, `6eb224a`, `96115d3`, `25eb5aa`
+- Issue: SPARK-60
+- Related Document: [04_Level_Design.md](./04_Level_Design.md)
+
+---
+
 # Daily Log Template
 
 

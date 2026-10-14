@@ -78,6 +78,4 @@ flowchart LR
 
 Git LFS를 사용할 수 없어 대용량 에셋은 Google Drive로 관리합니다.
 
-[Google Drive 에셋 폴더](https://drive.google.com/drive/folders/17hMg9nc95p2RM80jxRy6xg5npcK4xQmn?usp=sharing)
-
-[Google Drive 추가 폴더](https://drive.google.com/drive/folders/1jvjmZONvhoY0_yv30ekpqJMNpfjx-KZS?usp=sharing)
+[Google Drive 에셋 폴더](https://drive.google.com/drive/folders/1jvjmZONvhoY0_yv30ekpqJMNpfjx-KZS?usp=sharing)
